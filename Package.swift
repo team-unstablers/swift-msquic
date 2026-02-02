@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 5.9
 import PackageDescription
 import Foundation
 
@@ -9,7 +9,7 @@ let package = Package(
         .iOS(.v14)
     ],
     products: [
-        .library(name: "SwiftMsQuic", targets: ["SwiftMsQuic"])
+        .library(name: "SwiftMsQuic", targets: ["SwiftMsQuic", "SwiftMsQuicHelper"])
     ],
     targets: [
         .plugin(
@@ -31,6 +31,17 @@ let package = Package(
             ],
             plugins: [
                 "PrebuiltLibraryInjector"
+            ]
+        ),
+        .target(
+            name: "SwiftMsQuicHelper",
+            dependencies: [
+                .target(name: "SwiftMsQuic")
+            ],
+            path: "Sources/SwiftMsQuicHelper",
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(["-strict-concurrency=minimal"]) 
             ]
         )
     ]
