@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 
 public struct QuicSettings {
     public var maxBytesPerKey: UInt64?

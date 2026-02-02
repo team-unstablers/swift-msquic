@@ -7,7 +7,7 @@
 
 import Foundation
 
-import SwiftMsQuic
+import MsQuic
 
 public enum QuicExecutionProfile {
     case lowLatency

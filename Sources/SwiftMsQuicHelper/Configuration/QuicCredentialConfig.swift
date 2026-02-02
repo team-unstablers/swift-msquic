@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 
 public enum QuicCredentialType {
     /// Certificate file path (PEM etc) and private key path

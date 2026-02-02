@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 import os
 
 public final class QuicStream: QuicObject {

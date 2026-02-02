@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 
 public struct QuicStreamOpenFlags: OptionSet, Sendable {
     public let rawValue: UInt32

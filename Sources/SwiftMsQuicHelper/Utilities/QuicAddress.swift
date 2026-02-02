@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)

@@ -7,7 +7,7 @@
 
 import Foundation
 
-import SwiftMsQuic
+import MsQuic
 
 public struct QuicRegistrationConfig {
     public let appName: String

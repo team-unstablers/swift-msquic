@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 
 public enum QuicDatagramSendState: Sendable {
     case unknown

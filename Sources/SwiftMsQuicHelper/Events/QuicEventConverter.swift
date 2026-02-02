@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 
 internal enum QuicEventConverter {
     static func convert(_ event: QUIC_LISTENER_EVENT) -> QuicListenerEvent {

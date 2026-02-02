@@ -6,12 +6,14 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
 import Glibc
 #endif
+
+public typealias QuicStatusRawValue = UInt32
 
 public struct QuicStatus: RawRepresentable, Hashable, Equatable, Sendable {
     // unsigned int

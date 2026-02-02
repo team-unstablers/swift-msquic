@@ -7,7 +7,7 @@
 
 import Foundation
 
-import SwiftMsQuic
+import MsQuic
 
 public extension QUIC_API_TABLE {
     

@@ -9,39 +9,29 @@ let package = Package(
         .iOS(.v16)
     ],
     products: [
-        .library(name: "SwiftMsQuic", targets: ["SwiftMsQuic", "SwiftMsQuicHelper"])
+        .library(name: "SwiftMsQuic", targets: ["MsQuic", "SwiftMsQuicHelper"])
     ],
     targets: [
-        .plugin(
-            name: "PrebuiltLibraryInjector",
-            capability: .buildTool(),
-        ),
-        .target(
-            name: "SwiftMsQuic",
-            path: "Sources/SwiftMsQuic",
-            publicHeadersPath: "msquic",
-            cxxSettings: [
-                .define("QUIC_BUILD_STATIC"),
-                .unsafeFlags(["-Wno-module-import-in-extern-c"])
-            ],
-            linkerSettings: [
-                .linkedLibrary("msquic", .when(platforms: [.macOS, .iOS])),
-                .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS])),
-                .linkedFramework("Security", .when(platforms: [.macOS, .iOS])),
-            ],
-            plugins: [
-                "PrebuiltLibraryInjector"
-            ]
+        .binaryTarget(
+            name: "MsQuic",
+            path: "./dist/MsQuic.xcframework"
         ),
         .target(
             name: "SwiftMsQuicHelper",
             dependencies: [
-                .target(name: "SwiftMsQuic")
+                .target(name: "MsQuic")
             ],
             path: "Sources/SwiftMsQuicHelper",
             swiftSettings: [
-                .interoperabilityMode(.Cxx),
                 .unsafeFlags(["-strict-concurrency=minimal"]) 
+            ]
+        ),
+        .executableTarget(
+            name: "SwiftMsQuicExample",
+            dependencies: ["SwiftMsQuicHelper"],
+            path: "Sources/SwiftMsQuicExample",
+            swiftSettings: [
+                .interoperabilityMode(.Cxx)
             ]
         )
     ]

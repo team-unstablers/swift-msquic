@@ -1,0 +1,4 @@
+module MsQuic [system] {
+  header "msquic.h"
+  export *
+}

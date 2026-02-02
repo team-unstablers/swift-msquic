@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 
 open class QuicObject: CInteropHandle {
     /// Internal MsQuic Handle

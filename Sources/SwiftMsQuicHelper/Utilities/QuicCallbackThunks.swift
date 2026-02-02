@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 
 internal func quicListenerCallback(
     _ listener: HQUIC?,

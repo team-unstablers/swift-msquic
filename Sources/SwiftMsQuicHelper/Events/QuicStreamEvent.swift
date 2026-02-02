@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 
 public enum QuicStreamEvent {
     case startComplete(status: QuicStatus, id: UInt64, peerAccepted: Bool)

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuic
+import MsQuic
 
 public final class QuicConfiguration: QuicObject {
     public let registration: QuicRegistration
