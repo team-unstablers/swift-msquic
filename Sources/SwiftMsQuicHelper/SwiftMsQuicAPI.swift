@@ -21,9 +21,6 @@ public struct SwiftMsQuicAPI {
         return msQuic.pointee
     }
     
-    private static var registration: HQUIC? = nil
-    private static var configuration: HQUIC? = nil
-    
     /// wraps MsQuicOpen2()
     public static func open() -> QuicStatus {
         return QuicStatus(MsQuicOpen2(&_MsQuic))
@@ -35,20 +32,6 @@ public struct SwiftMsQuicAPI {
     }
 }
 
-public extension SwiftMsQuicAPI {
-    static func registrationOpen(_ config: QuicRegistrationConfig) -> QuicStatus {
-        return config.appName.withCString { appNameCStr in
-            var libStruct = QUIC_REGISTRATION_CONFIG(
-                AppName: appNameCStr,
-                ExecutionProfile: config.executionProfile.asLibEnum
-            )
-            
-            return QuicStatus(MsQuic.RegistrationOpen(&libStruct, &registration))
-        }
-    }
-    
-    
-}
 
 
 

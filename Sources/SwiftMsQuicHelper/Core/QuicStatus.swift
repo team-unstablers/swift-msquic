@@ -35,6 +35,12 @@ public extension QuicStatus {
     var failed: Bool {
         Int32(bitPattern: rawValue) <= 0
     }
+    
+    func throwIfFailed() throws {
+        if failed {
+            throw QuicError(status: self)
+        }
+    }
 }
 
 public extension QuicStatus {
