@@ -18,8 +18,7 @@ public struct SwiftMsQuicAPI {
             fatalError("MsQuic not initialized! call SwiftMsQuicAPI.open() first")
         }
         
-        let apiTable = msQuic as! UnsafePointer<QUIC_API_TABLE>
-        
+        let apiTable = msQuic.bindMemory(to: QUIC_API_TABLE.self, capacity: 1)
         return apiTable.pointee
     }
     

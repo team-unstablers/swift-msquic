@@ -30,12 +30,11 @@ public struct QuicStatus: RawRepresentable, Hashable, Equatable, Sendable {
 
 public extension QuicStatus {
     var succeeded: Bool {
-        // static_cast<int>(X) > 0
-        Int32(bitPattern: rawValue) > 0
+        Int32(bitPattern: rawValue) <= 0
     }
     
     var failed: Bool {
-        Int32(bitPattern: rawValue) <= 0
+        Int32(bitPattern: rawValue) > 0
     }
     
     func throwIfFailed() throws {
