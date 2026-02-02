@@ -1,0 +1,4 @@
+module SwiftMsQuic {
+    header "msquic_hpp.h"
+    export *
+}
