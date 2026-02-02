@@ -5,8 +5,8 @@ import Foundation
 let package = Package(
     name: "SwiftMsQuic",
     platforms: [
-        .macOS(.v11),
-        .iOS(.v14)
+        .macOS(.v13),
+        .iOS(.v16)
     ],
     products: [
         .library(name: "SwiftMsQuic", targets: ["SwiftMsQuic", "SwiftMsQuicHelper"])
