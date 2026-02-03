@@ -24,6 +24,7 @@ public enum QuicError: Error, Hashable, Sendable {
     case serverBusy
     case protocolError
     case streamLimitReached
+    case notSupported
     
     case tlsError(alert: Int32)
     case certError(type: CertErrorType)
@@ -52,6 +53,7 @@ public enum QuicError: Error, Hashable, Sendable {
         case .internalError:        self = .internalError
         case .protocolError:        self = .protocolError
         case .streamLimitReached:   self = .streamLimitReached
+        case .notSupported:         self = .notSupported
             
         default:
             // Check for TLS Errors
