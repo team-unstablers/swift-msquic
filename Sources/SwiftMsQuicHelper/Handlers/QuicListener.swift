@@ -97,6 +97,13 @@ public final class QuicListener: QuicObject {
                 return .connectionRefused
             }
             
+            // Set callback handler with nil context to satisfy MsQuic assertion when returning PENDING.
+            // This prevents the "App MUST set callback handler or close connection!" assertion.
+            typealias ConnectionCallback = @convention(c) (HQUIC?, UnsafeMutableRawPointer?, UnsafeMutablePointer<QUIC_CONNECTION_EVENT>?) -> QuicStatusRawValue
+            let callback = quicConnectionCallback as ConnectionCallback
+            let callbackPtr = unsafeBitCast(callback, to: UnsafeMutableRawPointer.self)
+            api.SetCallbackHandler(info.connection, callbackPtr, nil)
+            
             Task {
                 do {
                     if let _ = try await handler(self, info) {

@@ -7,9 +7,13 @@
 
 import Foundation
 import SwiftMsQuicHelper
+import os
 
 @main
 struct App {
+    // Keep server-side connections alive until shutdown
+    static let connectionLock = OSAllocatedUnfairLock(initialState: [ObjectIdentifier: QuicConnection]())
+    
     static func main() async throws {
         print("Initializing MsQuic...")
         try SwiftMsQuicAPI.open().throwIfFailed()
@@ -54,7 +58,11 @@ struct App {
         print("[Server] Starting...")
         let reg = try QuicRegistration(config: .init(appName: "MsQuicEchoServer", executionProfile: .lowLatency))
         
-        let config = try QuicConfiguration(registration: reg, alpnBuffers: ["echo"])
+        var settings = QuicSettings()
+        settings.peerBidiStreamCount = 100
+        settings.idleTimeoutMs = 30000 // 30 sec idle timeout
+        
+        let config = try QuicConfiguration(registration: reg, alpnBuffers: ["echo"], settings: settings)
         
         // Try to load cert
         let certPath = "server.crt"
@@ -95,9 +103,8 @@ struct App {
         
         listener.onNewConnection { listener, info in
             print("[Server] New connection from \(info.remoteAddress)")
-            let connection = try QuicConnection(handle: info.connection, configuration: config)
             
-            connection.onPeerStreamStarted { conn, stream in
+            let connection = try QuicConnection(handle: info.connection, configuration: config) { conn, stream in
                 print("[Server] Stream started")
                 do {
                     for try await data in stream.receive {
@@ -110,6 +117,20 @@ struct App {
                 } catch {
                     print("[Server] Stream error: \(error)")
                 }
+            }
+            
+            // Retain connection to prevent premature deallocation
+            connectionLock.withLock { $0[ObjectIdentifier(connection)] = connection }
+            
+            connection.onEvent { conn, event in
+                if case .shutdownComplete = event {
+                    print("[Server] Connection shutdown complete")
+                    // Release asynchronously to avoid calling ConnectionClose inside the callback
+                    Task {
+                        connectionLock.withLock { $0.removeValue(forKey: ObjectIdentifier(conn)) }
+                    }
+                }
+                return .success
             }
             
             return connection

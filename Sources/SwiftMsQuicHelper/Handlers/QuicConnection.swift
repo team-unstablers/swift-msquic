@@ -59,9 +59,11 @@ public final class QuicConnection: QuicObject {
         self.handle = handle
     }
     
-    public init(handle: HQUIC, configuration: QuicConfiguration) throws {
+    public init(handle: HQUIC, configuration: QuicConfiguration, streamHandler: StreamHandler? = nil) throws {
         self.registration = configuration.registration
         super.init(handle: handle)
+        
+        self.peerStreamHandler = streamHandler
         
         typealias ConnectionCallback = @convention(c) (HQUIC?, UnsafeMutableRawPointer?, UnsafeMutablePointer<QUIC_CONNECTION_EVENT>?) -> QuicStatusRawValue
         let callback = quicConnectionCallback as ConnectionCallback

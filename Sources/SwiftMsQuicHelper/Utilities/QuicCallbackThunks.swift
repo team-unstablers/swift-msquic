@@ -25,7 +25,10 @@ internal func quicConnectionCallback(
     _ context: UnsafeMutableRawPointer?,
     _ event: UnsafeMutablePointer<QUIC_CONNECTION_EVENT>?
 ) -> QuicStatusRawValue {
-    guard let context = context, let event = event else {
+    guard let context = context else {
+        return QuicStatus.success.rawValue
+    }
+    guard let event = event else {
         return QuicStatus.invalidParameter.rawValue
     }
     let obj = QuicConnection.fromCInteropHandle(context)
