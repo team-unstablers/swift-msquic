@@ -1,5 +1,0 @@
-module SwiftMsQuic {
-    header "msquic_hpp.h"
-    header "tuext_quic_helper.hpp"
-    export *
-}
