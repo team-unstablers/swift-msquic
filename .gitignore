@@ -1,3 +1,6 @@
 .DS_Store
 .build
 .swiftpm
+
+server.key
+server.crt
