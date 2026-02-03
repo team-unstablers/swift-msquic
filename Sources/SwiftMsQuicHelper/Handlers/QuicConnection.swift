@@ -189,14 +189,28 @@ public final class QuicConnection: QuicObject {
             }
             continuation?.resume(throwing: QuicError(status: status))
             
-        case .shutdownComplete:
-            let continuation = internalState.withLock { state -> CheckedContinuation<Void, Never>? in
-                state.connectionState = .closed
-                let c = state.shutdownContinuation
-                state.shutdownContinuation = nil
+        case .shutdownInitiatedByPeer:
+            let continuation = internalState.withLock { state -> CheckedContinuation<Void, Error>? in
+                let c = state.connectContinuation
+                state.connectContinuation = nil
                 return c
             }
-            continuation?.resume()
+            continuation?.resume(throwing: QuicError.aborted)
+            
+        case .shutdownComplete:
+            let (shutdownContinuation, connectContinuation) = internalState.withLock { state -> (CheckedContinuation<Void, Never>?, CheckedContinuation<Void, Error>?) in
+                state.connectionState = .closed
+                let sc = state.shutdownContinuation
+                state.shutdownContinuation = nil
+                
+                let cc = state.connectContinuation
+                state.connectContinuation = nil
+                
+                return (sc, cc)
+            }
+            shutdownContinuation?.resume()
+            connectContinuation?.resume(throwing: QuicError.aborted)
+            
             Task {
                 self.releaseSelfFromCallback()
             }
