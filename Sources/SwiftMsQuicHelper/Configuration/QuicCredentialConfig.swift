@@ -12,8 +12,8 @@ public enum QuicCredentialType {
     /// Certificate file path (PEM etc) and private key path
     case certificateFile(certPath: String, keyPath: String)
     
-    /// PKCS#12 file
-    case certificatePkcs12(path: String, password: String?)
+    /// PKCS#12 blob (ASN.1)
+    case certificatePkcs12(blob: Data, password: String?)
     
     /// No certificate (Client mode, or when using system store implicitly if supported later)
     case none
@@ -72,38 +72,14 @@ public struct QuicCredentialConfig {
                 }
             }
             
-        case .certificatePkcs12(let path, let password):
+        case .certificatePkcs12(let blob, let password):
             config.Type = QUIC_CREDENTIAL_TYPE_CERTIFICATE_PKCS12
-            // We need to read the file into a buffer for PKCS12
-            // Or does MsQuic accept a path?
-            // Checking msquic.h:
-            // typedef struct QUIC_CERTIFICATE_PKCS12 {
-            //     const uint8_t *Asn1Blob;
-            //     uint32_t Asn1BlobLength;
-            //     const char *PrivateKeyPassword;
-            // } QUIC_CERTIFICATE_PKCS12;
-            // It expects a Blob, not a file path.
             
-            // So we must read the file.
-            // CAUTION: This performs synchronous I/O.
-            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
-                // If file read fails, we can't really throw here easily as this is a conversion function
-                // but maybe we should propagate error?
-                // For now, let's treat it as empty or fail?
-                // Ideally this function should allow throwing.
-                // Re-declaring `rethrows` but we are actually throwing error inside closures?
-                // The signature says `rethrows`, so we can throw if `body` throws, 
-                // but if WE throw, it must be marked `throws`.
-                // Let's change signature to `throws` implicitly by making `rethrows` work
-                // But wait, reading file is not part of `body`.
-                fatalError("Failed to read PKCS12 file at \(path)")
-            }
-            
-            return try data.withUnsafeBytes { rawBuffer in
+            return try blob.withUnsafeBytes { rawBuffer in
                 return try (password ?? "").withCString { pwdPtr in
                     var pkcs12 = QUIC_CERTIFICATE_PKCS12(
                         Asn1Blob: rawBuffer.bindMemory(to: UInt8.self).baseAddress,
-                        Asn1BlobLength: UInt32(data.count),
+                        Asn1BlobLength: UInt32(blob.count),
                         PrivateKeyPassword: password != nil ? pwdPtr : nil
                     )
                     return try withUnsafeMutablePointer(to: &pkcs12) { pkcs12Ptr in
