@@ -44,7 +44,13 @@ public struct QuicCredentialConfig {
         self.flags = flags
     }
     
-    internal func withUnsafeCredentialConfig<T>(_ body: (UnsafePointer<QUIC_CREDENTIAL_CONFIG>) throws -> T) rethrows -> T {
+    internal func withUnsafeCredentialConfig<T>(_ body: (UnsafePointer<QUIC_CREDENTIAL_CONFIG>) throws -> T) throws -> T {
+        if flags.contains(.loadAsynchronous) {
+            // Async credential loading requires the credential buffers to live beyond this call.
+            // This wrapper currently doesn't manage that lifetime.
+            throw QuicError.notSupported
+        }
+
         var config = QUIC_CREDENTIAL_CONFIG()
         config.Flags = QUIC_CREDENTIAL_FLAGS(flags.rawValue)
         
