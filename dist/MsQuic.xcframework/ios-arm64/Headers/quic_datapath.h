@@ -192,17 +192,14 @@ typedef struct CXPLAT_RAW_TCP_STATE {
 } CXPLAT_RAW_TCP_STATE;
 
 //
-// An opaque queue type. Each queue is associated with a single RSS queue on a
-// single interface.
-//
-typedef struct CXPLAT_QUEUE CXPLAT_QUEUE;
-
-//
 // Structure to represent a network route.
 //
 typedef struct CXPLAT_ROUTE {
 
-    CXPLAT_QUEUE* Queue;
+    //
+    // The (RSS) queue that this route is primarily associated with.
+    //
+    void* Queue;
 
     QUIC_ADDR RemoteAddress;
     QUIC_ADDR LocalAddress;
@@ -435,19 +432,20 @@ typedef enum CXPLAT_DATAPATH_FEATURES {
     CXPLAT_DATAPATH_FEATURE_RAW                = 0x00000040,
     CXPLAT_DATAPATH_FEATURE_TTL                = 0x00000080,
     CXPLAT_DATAPATH_FEATURE_SEND_DSCP          = 0x00000100,
-    CXPLAT_DATAPATH_FEATURE_RECV_DSCP          = 0x00000200,
+    CXPLAT_DATAPATH_FEATURE_RIO                = 0x00000200,
+    CXPLAT_DATAPATH_FEATURE_RECV_DSCP          = 0x00000400,
 } CXPLAT_DATAPATH_FEATURES;
 
 DEFINE_ENUM_FLAG_OPERATORS(CXPLAT_DATAPATH_FEATURES)
 
 typedef enum CXPLAT_SOCKET_FLAGS {
-    CXPLAT_SOCKET_FLAG_NONE         = 0x00000000,
-    CXPLAT_SOCKET_FLAG_PCP          = 0x00000001, // Socket is used for internal PCP support
-    CXPLAT_SOCKET_FLAG_SHARE        = 0x00000002, // Forces sharing of the address and port
-    CXPLAT_SOCKET_SERVER_OWNED      = 0x00000004, // Indicates socket is a listener socket
-    CXPLAT_SOCKET_FLAG_XDP          = 0x00000008, // Socket will use XDP
-    CXPLAT_SOCKET_FLAG_QTIP         = 0x00000010, // Socket will use QTIP
-    CXPLAT_SOCKET_FLAG_PARTITIONED  = 0x00000020, // Socket is partitioned
+    CXPLAT_SOCKET_FLAG_NONE     = 0x00000000,
+    CXPLAT_SOCKET_FLAG_PCP      = 0x00000001, // Socket is used for internal PCP support
+    CXPLAT_SOCKET_FLAG_SHARE    = 0x00000002, // Forces sharing of the address and port
+    CXPLAT_SOCKET_SERVER_OWNED  = 0x00000004, // Indicates socket is a listener socket
+    CXPLAT_SOCKET_FLAG_XDP      = 0x00000008, // Socket will use XDP
+    CXPLAT_SOCKET_FLAG_QTIP     = 0x00000010, // Socket will use QTIP
+    CXPLAT_SOCKET_FLAG_RIO      = 0x00000020, // Socket will use RIO
 } CXPLAT_SOCKET_FLAGS;
 
 DEFINE_ENUM_FLAG_OPERATORS(CXPLAT_SOCKET_FLAGS)
@@ -594,21 +592,12 @@ CxPlatDataPathGetGatewayAddresses(
 //
 // The following APIs are specific to a single UDP or TCP socket abstraction.
 //
-
-//
-// When using CXPLAT_UDP_CONFIG, keep in mind the assumptions made by MsQuic core/datapath code about the config:
-//      - A server listener MUST specify a NULL remote address AND a wildcard local address.
-//      - A client connection MUST specify a non-NULL remote address.
-//      - A remote address MUST NOT be a wildcard address.
-//      - A client connection can specify anything for the local address: NULL, wildcard, any <ip/port tupple>.
-//        If NULL, the datapath will assume an IPv6 socket local address.
-//
 typedef struct CXPLAT_UDP_CONFIG {
     const QUIC_ADDR* LocalAddress;      // optional
     const QUIC_ADDR* RemoteAddress;     // optional
     CXPLAT_SOCKET_FLAGS Flags;
     uint32_t InterfaceIndex;            // 0 means any/all
-    uint16_t PartitionIndex;            // optional
+    uint16_t PartitionIndex;            // Client-only
     void* CallbackContext;              // optional
 #ifdef QUIC_COMPARTMENT_ID
     QUIC_COMPARTMENT_ID CompartmentId;  // optional

@@ -604,18 +604,6 @@ CxPlatRefInitializeEx(
     *RefCount = (LONG_PTR)Initial;
 }
 
-QUIC_INLINE
-void
-CxPlatRefInitializeMultiple(
-    _Out_writes_(Count) CXPLAT_REF_COUNT* RefCounts,
-    _In_ uint32_t Count
-    )
-{
-    for (uint32_t i = 0; i < Count; i++) {
-        CxPlatRefInitialize(&RefCounts[i]);
-    }
-}
-
 #define CxPlatRefUninitialize(RefCount)
 
 QUIC_INLINE
@@ -1013,8 +1001,11 @@ CxPlatTimeDiff32(
     _In_ uint32_t T2      // Second time measured
     )
 {
-    // Subtraction handles wraparound automatically in the ring 2^32
-    return T2 - T1;
+    if (T2 > T1) {
+        return T2 - T1;
+    } else { // Wrap around case.
+        return T2 + (0xFFFFFFFF - T1) + 1;
+    }
 }
 
 //

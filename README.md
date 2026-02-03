@@ -8,7 +8,7 @@ This library simplifies the usage of the QUIC protocol in Swift applications on 
 
 - **Swift Concurrency Support**: All asynchronous operations (connect, send, receive, etc.) are wrapped with `async/await` and `AsyncSequence`.
 - **Memory Safety**: Class-based wrappers handle MsQuic handle lifetimes automatically using ARC (Automatic Reference Counting).
-- **Prebuilt Binaries**: Includes `MsQuic.xcframework` (v2.5.7-rc), so you don't need to build MsQuic from source.
+- **Prebuilt Binaries**: Includes `MsQuic.xcframework` (`v2.5.6-tuvariant`), so you don't need to build MsQuic from source.
 - **iOS Compatible**: Modified to comply with iOS App Store guidelines (removed `dlopen` calls).
 
 ## Requirements
@@ -23,7 +23,7 @@ Add `swift-msquic` to your `Package.swift` dependencies:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/team-unstablers/swift-msquic.git", branch: "main")
+    .package(url: "https://github.com/team-unstablers/swift-msquic.git", from: "1.0.4")
 ]
 ```
 
@@ -150,4 +150,4 @@ The following agents/models were used:
 
 ## Author
 
-- Gyuhwan Park (Team Unstablers Inc.) <unstabler@unstabler.pl>
+- Gyuhwan Park★ (Team Unstablers Inc.) <unstabler@unstabler.pl>

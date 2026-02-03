@@ -49,8 +49,6 @@ extern "C" {
 #define CXPLAT_CONTAINING_RECORD(address, type, field) \
     ((type *)((uint8_t*)(address) - offsetof(type, field)))
 
-#define CXPLAT_FIELD_SIZE(type, field) (sizeof(((type *)0)->field))
-
 #define CXPLAT_STRUCT_SIZE_THRU_FIELD(Type, Field) \
     (offsetof(Type, Field) + sizeof(((Type*)0)->Field))
 
@@ -159,8 +157,6 @@ typedef struct CXPLAT_SLIST_ENTRY {
 #define QUIC_POOL_APP_BUFFER_CHUNK          'D4cQ' // Qc4D - QUIC receive chunk for app buffers
 #define QUIC_POOL_CONN_POOL_API_TABLE       'E4cQ' // Qc4E - QUIC Connection Pool API table
 #define QUIC_POOL_DATAPATH_RSS_CONFIG       'F4cQ' // Qc4F - QUIC Datapath RSS configuration
-#define QUIC_POOL_TLS_AUX_DATA              '05cQ' // Qc50 - QUIC TLS Backing Aux data
-#define QUIC_POOL_TLS_RECORD_ENTRY          '15cQ' // Qc51 - QUIC TLS Backing Record storage
 
 typedef enum CXPLAT_THREAD_FLAGS {
     CXPLAT_THREAD_FLAG_NONE               = 0x0000,
@@ -270,7 +266,6 @@ CxPlatListIsEmpty(
     _In_ const CXPLAT_LIST_ENTRY* ListHead
     )
 {
-    CXPLAT_DBG_ASSERT(ListHead->Flink != NULL);
     return (BOOLEAN)(ListHead->Flink == ListHead);
 }
 
@@ -477,28 +472,9 @@ typedef struct CXPLAT_WORKER_POOL CXPLAT_WORKER_POOL;
 // Worker pool API used for driving execution contexts
 //
 
-//
-// Different references on a worker pool.
-//
-typedef enum CXPLAT_WORKER_POOL_REF {
-
-    CXPLAT_WORKER_POOL_REF_EXTERNAL,    // Created by ExecutionCreate
-    CXPLAT_WORKER_POOL_REF_LIBRARY,     // Created by MsQuic
-    CXPLAT_WORKER_POOL_REF_EPOLL,
-    CXPLAT_WORKER_POOL_REF_IOURING,
-    CXPLAT_WORKER_POOL_REF_KQUEUE,
-    CXPLAT_WORKER_POOL_REF_RAW,
-    CXPLAT_WORKER_POOL_REF_WINSOCK,
-    CXPLAT_WORKER_POOL_REF_TOOL,
-
-    CXPLAT_WORKER_POOL_REF_COUNT
-
-} CXPLAT_WORKER_POOL_REF;
-
 CXPLAT_WORKER_POOL*
 CxPlatWorkerPoolCreate(
-    _In_opt_ QUIC_GLOBAL_EXECUTION_CONFIG* Config,
-    _In_ CXPLAT_WORKER_POOL_REF RefType
+    _In_opt_ QUIC_GLOBAL_EXECUTION_CONFIG* Config
     );
 
 _Success_(return != NULL)
@@ -511,8 +487,7 @@ CxPlatWorkerPoolCreateExternal(
 
 void
 CxPlatWorkerPoolDelete(
-    _In_opt_ CXPLAT_WORKER_POOL* WorkerPool,
-    _In_ CXPLAT_WORKER_POOL_REF RefType
+    _In_opt_ CXPLAT_WORKER_POOL* WorkerPool
     );
 
 uint32_t
@@ -522,14 +497,12 @@ CxPlatWorkerPoolGetCount(
 
 BOOLEAN
 CxPlatWorkerPoolAddRef(
-    _In_ CXPLAT_WORKER_POOL* WorkerPool,
-    _In_ CXPLAT_WORKER_POOL_REF RefType
+    _In_ CXPLAT_WORKER_POOL* WorkerPool
     );
 
 void
 CxPlatWorkerPoolRelease(
-    _In_ CXPLAT_WORKER_POOL* WorkerPool,
-    _In_ CXPLAT_WORKER_POOL_REF RefType
+    _In_ CXPLAT_WORKER_POOL* WorkerPool
     );
 
 uint32_t
@@ -591,6 +564,13 @@ BOOLEAN
     _Inout_ CXPLAT_EXECUTION_STATE* State
     );
 
+typedef
+_IRQL_requires_max_(PASSIVE_LEVEL)
+BOOLEAN
+(*CXPLAT_EXECUTION_WAKE_FN)(
+    _Inout_ CXPLAT_EXECUTION_CONTEXT* Context
+    );
+
 typedef struct CXPLAT_EXECUTION_CONTEXT {
 
     CXPLAT_SLIST_ENTRY Entry;
@@ -604,22 +584,12 @@ typedef struct CXPLAT_EXECUTION_CONTEXT {
 
 #ifdef _KERNEL_MODE // Not supported on kernel mode
 #define CxPlatWakeExecutionContext(Context) CXPLAT_FRE_ASSERT(FALSE)
-#if DEBUG
-#define CxPlatWorkerIsThisThread(Context) TRUE
 #else
-#define CxPlatWorkerIsThisThread(Context) CXPLAT_FRE_ASSERT(FALSE)
-#endif
-#else // _KERNEL_MODE
 void
 CxPlatWakeExecutionContext(
     _In_ CXPLAT_EXECUTION_CONTEXT* Context
     );
-
-BOOLEAN
-CxPlatWorkerIsThisThread(
-    _In_ CXPLAT_EXECUTION_CONTEXT* Context
-    );
-#endif // _KERNEL_MODE
+#endif
 
 //
 // Test Interface for loading a self-signed certificate.

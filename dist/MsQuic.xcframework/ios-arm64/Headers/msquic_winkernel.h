@@ -25,7 +25,6 @@ Environment:
 #include <ntstatus.h>
 #include <basetsd.h>
 #include <netioddk.h>
-#include <ntintsafe.h>
 
 #define QUIC_INLINE inline
 
