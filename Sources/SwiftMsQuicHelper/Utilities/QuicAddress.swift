@@ -53,27 +53,10 @@ public struct QuicAddress: CustomStringConvertible, Sendable {
             addr.Ipv6.sin6_family = sa_family_t(AF_INET6)
             addr.Ipv6.sin6_port = port.bigEndian
         case .unspecified:
-            // Usually MsQuic interprets family 0 as UNSPEC
-            // But if we want to bind to all interfaces, it depends on the platform defaults.
-            // Usually we pick IPv6 and set V6ONLY=0, or use UNSPEC.
+            // MsQuic treats AF_UNSPEC as "listen on both IPv4 and IPv6".
+            // Keep address zeroed; set port in the union (IPv6 view) like QuicAddrSetPort does.
             addr.Ip.sa_family = sa_family_t(AF_UNSPEC)
-            // Port location is same for v4/v6 usually but not guaranteed for UNSPEC generic sockaddr safely in all strict modes.
-            // But here QUIC_ADDR union layout allows setting port via Ipv4 or Ipv6 view if we know the layout.
-            // However, safe way is to set family. MsQuic handles the rest for ListenerStart(NULL) or similar.
-            // If LocalAddress is provided to ListenerStart, it should be valid.
-            // If family is UNSPEC, MsQuic might reject if port is non-zero?
-            // Let's assume user knows what they are doing.
-            // We'll set it as IPv6 dual-stack equivalent if possible or just IPv4 for now if UNSPEC is problematic with port.
-            // MsQuic docs say: "If the Family is unspecified, the listener will listen on both IPv4 and IPv6."
-            // So we just set family. Where to put port?
-            // "The port is ignored if the family is unspecified." -> Wait, really?
-            // Actually MsQuic ListenerStart: "If LocalAddress is NULL, the listener listens on all available interfaces on a random port."
-            // If non-NULL, it binds.
-            // If family is UNSPEC, it might imply "Any" address?
-            // Usually one uses AF_INET6 + in6addr_any for dual stack.
-            addr.Ipv6.sin6_family = sa_family_t(AF_INET6)
             addr.Ipv6.sin6_port = port.bigEndian
-            addr.Ipv6.sin6_addr = in6addr_any
         }
         self.raw = addr
     }
