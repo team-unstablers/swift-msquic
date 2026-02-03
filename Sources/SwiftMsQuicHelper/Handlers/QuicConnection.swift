@@ -57,11 +57,13 @@ public final class QuicConnection: QuicObject {
         )
         try status.throwIfFailed()
         self.handle = handle
+        retainSelfForCallback()
     }
     
     public init(handle: HQUIC, configuration: QuicConfiguration, streamHandler: StreamHandler? = nil) throws {
         self.registration = configuration.registration
         super.init(handle: handle)
+        retainSelfForCallback()
         
         self.peerStreamHandler = streamHandler
         
@@ -118,6 +120,7 @@ public final class QuicConnection: QuicObject {
                     $0.connectContinuation = nil
                     $0.connectionState = .closed
                 }
+                releaseSelfFromCallback()
                 continuation.resume(throwing: QuicError(status: status))
             }
         }
@@ -194,6 +197,9 @@ public final class QuicConnection: QuicObject {
                 return c
             }
             continuation?.resume()
+            Task {
+                self.releaseSelfFromCallback()
+            }
             
         case .peerStreamStarted(let streamHandle, _):
             if let handler = peerStreamHandler {
