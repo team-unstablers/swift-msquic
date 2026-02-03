@@ -22,9 +22,7 @@ let package = Package(
                 .target(name: "MsQuic")
             ],
             path: "Sources/SwiftMsQuicHelper",
-            swiftSettings: [
-                .unsafeFlags(["-strict-concurrency=minimal"]) 
-            ]
+            swiftSettings: []
         ),
         .executableTarget(
             name: "SwiftMsQuicExample",
