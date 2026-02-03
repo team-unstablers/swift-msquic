@@ -36,14 +36,22 @@ public final class QuicStream: QuicObject {
     private class SendContext {
         let continuation: CheckedContinuation<Void, Error>
         let buffer: UnsafeMutableRawBufferPointer
+        let quicBuffer: UnsafeMutablePointer<QUIC_BUFFER>
         
         init(_ c: CheckedContinuation<Void, Error>, data: Data) {
             self.continuation = c
             self.buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: data.count, alignment: 1)
-            data.copyBytes(to: self.buffer)
+            if data.count > 0 {
+                data.copyBytes(to: self.buffer)
+            }
+            self.quicBuffer = UnsafeMutablePointer<QUIC_BUFFER>.allocate(capacity: 1)
+            let bytePtr = data.count > 0 ? self.buffer.bindMemory(to: UInt8.self).baseAddress : nil
+            self.quicBuffer.initialize(to: QUIC_BUFFER(Length: UInt32(data.count), Buffer: bytePtr))
         }
         
         deinit {
+            quicBuffer.deinitialize(count: 1)
+            quicBuffer.deallocate()
             buffer.deallocate()
         }
     }
@@ -65,6 +73,7 @@ public final class QuicStream: QuicObject {
     internal override init(handle: HQUIC) {
         self.connection = nil
         super.init(handle: handle)
+        retainSelfForCallback()
         
         typealias StreamCallback = @convention(c) (HQUIC?, UnsafeMutableRawPointer?, UnsafeMutablePointer<QUIC_STREAM_EVENT>?) -> QuicStatusRawValue
         let callback = quicStreamCallback as StreamCallback
@@ -80,8 +89,10 @@ public final class QuicStream: QuicObject {
     internal init(connection: QuicConnection, flags: QuicStreamOpenFlags) throws {
         self.connection = connection
         super.init()
+        retainSelfForCallback()
         
         guard let connHandle = connection.handle else {
+            releaseSelfFromCallback()
             throw QuicError.invalidState
         }
         
@@ -95,7 +106,12 @@ public final class QuicStream: QuicObject {
                 &handle
             )
         )
-        try status.throwIfFailed()
+        do {
+            try status.throwIfFailed()
+        } catch {
+            releaseSelfFromCallback()
+            throw error
+        }
         self.handle = handle
         
         initReceiveStream()
@@ -128,6 +144,7 @@ public final class QuicStream: QuicObject {
                     $0.startContinuation = nil
                     $0.streamState = .closed
                 }
+                releaseSelfFromCallback()
                 continuation.resume(throwing: QuicError(status: status))
             }
         }
@@ -140,16 +157,10 @@ public final class QuicStream: QuicObject {
             let context = SendContext(continuation, data: data)
             let contextPtr = Unmanaged.passRetained(context).toOpaque()
             
-            // Construct QUIC_BUFFER using the stable pointer
-            var qb = QUIC_BUFFER(
-                Length: UInt32(context.buffer.count),
-                Buffer: context.buffer.bindMemory(to: UInt8.self).baseAddress
-            )
-            
             let status = QuicStatus(
                 api.StreamSend(
                     handle,
-                    &qb,
+                    context.quicBuffer,
                     1,
                     QUIC_SEND_FLAGS(flags.rawValue),
                     contextPtr
@@ -243,6 +254,9 @@ public final class QuicStream: QuicObject {
                 return c
             }
             continuation?.resume()
+            Task {
+                self.releaseSelfFromCallback()
+            }
             
         default:
             break
