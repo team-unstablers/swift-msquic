@@ -9,12 +9,76 @@ import Foundation
 import MsQuic
 import os
 
+/// A QUIC connection that manages communication with a remote peer.
+///
+/// `QuicConnection` represents a single QUIC connection and provides methods for
+/// connecting to servers, managing streams, and handling connection lifecycle events.
+///
+/// ## Creating a Client Connection
+///
+/// To connect to a QUIC server:
+///
+/// ```swift
+/// let connection = try QuicConnection(registration: registration)
+/// try await connection.start(
+///     configuration: configuration,
+///     serverName: "example.com",
+///     serverPort: 443
+/// )
+/// ```
+///
+/// ## Handling Server-Side Connections
+///
+/// When accepting connections from a ``QuicListener``, use the handle-based initializer:
+///
+/// ```swift
+/// listener.onNewConnection { listener, info in
+///     let connection = try QuicConnection(
+///         handle: info.connection,
+///         configuration: configuration
+///     ) { conn, stream in
+///         // Handle incoming streams
+///     }
+///     return connection
+/// }
+/// ```
+///
+/// ## Topics
+///
+/// ### Creating Connections
+///
+/// - ``init(registration:)``
+/// - ``init(handle:configuration:streamHandler:)``
+///
+/// ### Managing Connection Lifecycle
+///
+/// - ``start(configuration:serverName:serverPort:)``
+/// - ``shutdown(errorCode:)``
+/// - ``state``
+///
+/// ### Working with Streams
+///
+/// - ``openStream(flags:)``
+/// - ``onPeerStreamStarted(_:)``
+///
+/// ### Event Handling
+///
+/// - ``onEvent(_:)``
+/// - ``State``
+/// - ``StreamHandler``
+/// - ``EventHandler``
 public final class QuicConnection: QuicObject {
+    /// The current state of the connection.
     public enum State: Sendable {
+        /// Connection has been created but not started.
         case idle
+        /// Connection is in the process of connecting to the peer.
         case connecting
+        /// Connection is established and ready for data transfer.
         case connected
+        /// Connection is shutting down.
         case shuttingDown
+        /// Connection has been closed.
         case closed
     }
     
@@ -26,18 +90,38 @@ public final class QuicConnection: QuicObject {
     
     private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
     
+    /// The current state of the connection.
     public var state: State {
         internalState.withLock { $0.connectionState }
     }
-    
+
+    /// The registration this connection belongs to, if any.
     public let registration: QuicRegistration?
-    
+
+    /// A handler for processing incoming streams initiated by the peer.
+    ///
+    /// - Parameters:
+    ///   - connection: The connection that received the stream.
+    ///   - stream: The new stream initiated by the peer.
     public typealias StreamHandler = (QuicConnection, QuicStream) async -> Void
     private var peerStreamHandler: StreamHandler?
-    
+
+    /// A handler for processing connection events.
+    ///
+    /// - Parameters:
+    ///   - connection: The connection that received the event.
+    ///   - event: The event that occurred.
+    /// - Returns: A status indicating how the event was handled.
     public typealias EventHandler = (QuicConnection, QuicConnectionEvent) -> QuicStatus
     private var eventHandler: EventHandler?
-    
+
+    /// Creates a new client-side connection.
+    ///
+    /// Use this initializer when creating a connection to connect to a remote server.
+    /// After creation, call ``start(configuration:serverName:serverPort:)`` to initiate the connection.
+    ///
+    /// - Parameter registration: The registration to associate with this connection.
+    /// - Throws: ``QuicError/invalidState`` if the registration handle is invalid.
     public init(registration: QuicRegistration) throws {
         self.registration = registration
         super.init()
@@ -60,6 +144,16 @@ public final class QuicConnection: QuicObject {
         retainSelfForCallback()
     }
     
+    /// Creates a connection from an existing MsQuic handle.
+    ///
+    /// Use this initializer when accepting a connection from a ``QuicListener``.
+    /// The connection is automatically configured and ready for use.
+    ///
+    /// - Parameters:
+    ///   - handle: The raw MsQuic connection handle from ``QuicListenerEvent/NewConnectionInfo``.
+    ///   - configuration: The configuration to apply to this connection.
+    ///   - streamHandler: An optional handler for streams initiated by the peer.
+    /// - Throws: ``QuicError/invalidState`` if the configuration handle is invalid.
     public init(handle: HQUIC, configuration: QuicConfiguration, streamHandler: StreamHandler? = nil) throws {
         self.registration = configuration.registration
         super.init(handle: handle)
@@ -83,6 +177,16 @@ public final class QuicConnection: QuicObject {
         internalState.withLock { $0.connectionState = .connected }
     }
     
+    /// Starts the connection to a remote server.
+    ///
+    /// This method initiates the QUIC handshake with the specified server.
+    /// The method returns when the connection is established or throws if the connection fails.
+    ///
+    /// - Parameters:
+    ///   - configuration: The configuration containing TLS and QUIC settings.
+    ///   - serverName: The hostname or IP address of the server.
+    ///   - serverPort: The port number to connect to.
+    /// - Throws: ``QuicError`` if the connection fails (e.g., timeout, handshake failure).
     public func start(
         configuration: QuicConfiguration,
         serverName: String,
@@ -126,6 +230,12 @@ public final class QuicConnection: QuicObject {
         }
     }
     
+    /// Gracefully shuts down the connection.
+    ///
+    /// This method initiates a graceful shutdown of the connection. All active streams
+    /// will be closed, and the connection will be terminated after the shutdown completes.
+    ///
+    /// - Parameter errorCode: An optional application-defined error code to send to the peer.
     public func shutdown(errorCode: UInt64 = 0) async {
         guard let handle = handle else { return }
         
@@ -149,14 +259,33 @@ public final class QuicConnection: QuicObject {
         }
     }
     
+    /// Opens a new stream on this connection.
+    ///
+    /// Creates a locally-initiated stream. After creation, call ``QuicStream/start(flags:)``
+    /// to begin using the stream.
+    ///
+    /// - Parameter flags: Flags controlling stream behavior (e.g., unidirectional).
+    /// - Returns: A new stream ready to be started.
+    /// - Throws: ``QuicError`` if the stream cannot be created.
     public func openStream(flags: QuicStreamOpenFlags = .none) throws -> QuicStream {
         return try QuicStream(connection: self, flags: flags)
     }
-    
+
+    /// Sets a handler for streams initiated by the peer.
+    ///
+    /// This handler is called whenever the remote peer opens a new stream on this connection.
+    ///
+    /// - Parameter handler: A closure that processes the new stream asynchronously.
     public func onPeerStreamStarted(_ handler: @escaping StreamHandler) {
         self.peerStreamHandler = handler
     }
-    
+
+    /// Sets a handler for connection events.
+    ///
+    /// Use this to receive low-level connection events. This is useful for monitoring
+    /// connection state changes or handling events not covered by the high-level API.
+    ///
+    /// - Parameter handler: A closure that processes connection events.
     public func onEvent(_ handler: @escaping EventHandler) {
         self.eventHandler = handler
     }

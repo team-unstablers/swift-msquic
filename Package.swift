@@ -11,6 +11,9 @@ let package = Package(
     products: [
         .library(name: "SwiftMsQuic", targets: ["MsQuic", "SwiftMsQuicHelper"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.3.0")
+    ],
     targets: [
         .binaryTarget(
             name: "MsQuic",

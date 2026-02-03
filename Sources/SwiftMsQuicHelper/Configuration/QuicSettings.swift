@@ -8,16 +8,54 @@
 import Foundation
 import MsQuic
 
+/// QUIC protocol settings for connections and configurations.
+///
+/// Use this structure to customize QUIC behavior such as timeouts, stream limits,
+/// and other protocol parameters. All properties are optional; only set properties
+/// are applied to the configuration.
+///
+/// ## Example
+///
+/// ```swift
+/// var settings = QuicSettings()
+/// settings.idleTimeoutMs = 30000
+/// settings.peerBidiStreamCount = 100
+/// settings.keepAliveIntervalMs = 10000
+///
+/// let config = try QuicConfiguration(
+///     registration: registration,
+///     alpnBuffers: ["my-protocol"],
+///     settings: settings
+/// )
+/// ```
 public struct QuicSettings {
+    /// Maximum number of bytes encrypted with a single key before key update.
     public var maxBytesPerKey: UInt64?
+
+    /// Timeout in milliseconds for the TLS handshake to complete.
     public var handshakeIdleTimeoutMs: UInt64?
+
+    /// Timeout in milliseconds for an idle connection before it's closed.
     public var idleTimeoutMs: UInt64?
+
+    /// Maximum delay in milliseconds before sending an acknowledgment.
     public var maxAckDelayMs: UInt32?
+
+    /// Timeout in milliseconds to wait for a connection to fully close.
     public var disconnectTimeoutMs: UInt32?
+
+    /// Interval in milliseconds between keep-alive packets.
+    ///
+    /// Set this to prevent idle timeout when there's no data to send.
     public var keepAliveIntervalMs: UInt32?
+
+    /// Maximum number of bidirectional streams the peer can open.
     public var peerBidiStreamCount: UInt16?
+
+    /// Maximum number of unidirectional streams the peer can open.
     public var peerUnidiStreamCount: UInt16?
-    
+
+    /// Creates a new settings instance with all properties unset.
     public init() { }
     
     internal func withUnsafeSettings<T>(_ body: (UnsafePointer<QUIC_SETTINGS>) throws -> T) rethrows -> T {

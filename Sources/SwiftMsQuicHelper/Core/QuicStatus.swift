@@ -13,30 +13,59 @@ import Darwin
 import Glibc
 #endif
 
+/// The raw type for QUIC status codes.
 public typealias QuicStatusRawValue = UInt32
 
+/// A status code returned by MsQuic operations.
+///
+/// `QuicStatus` wraps MsQuic status codes and provides convenient methods
+/// for checking success or failure and converting to ``QuicError``.
+///
+/// ## Checking Status
+///
+/// ```swift
+/// let status = SwiftMsQuicAPI.open()
+/// if status.succeeded {
+///     print("MsQuic opened successfully")
+/// }
+///
+/// // Or throw on failure
+/// try status.throwIfFailed()
+/// ```
 public struct QuicStatus: RawRepresentable, Hashable, Equatable, Sendable {
-    // unsigned int
+    /// The underlying raw status value.
     public var rawValue: QuicStatusRawValue
-    
+
+    /// Creates a status from a raw value.
     public init(rawValue: QuicStatusRawValue) {
         self.rawValue = rawValue
     }
-    
+
     static func defineStatus(_ x: Int32) -> Self {
         Self(rawValue: QuicStatusRawValue(bitPattern: x))
     }
 }
 
 public extension QuicStatus {
+    /// Whether the operation succeeded.
     var succeeded: Bool {
         Int32(bitPattern: rawValue) <= 0
     }
-    
+
+    /// Whether the operation failed.
     var failed: Bool {
         Int32(bitPattern: rawValue) > 0
     }
-    
+
+    /// Throws a ``QuicError`` if the status indicates failure.
+    ///
+    /// Use this method to convert MsQuic status codes into Swift errors.
+    ///
+    /// ```swift
+    /// try SwiftMsQuicAPI.open().throwIfFailed()
+    /// ```
+    ///
+    /// - Throws: ``QuicError`` if the status indicates failure.
     func throwIfFailed() throws {
         if failed {
             throw QuicError(status: self)

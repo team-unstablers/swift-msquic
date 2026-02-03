@@ -9,13 +9,65 @@ import Foundation
 import MsQuic
 import os
 
+/// A QUIC stream for bidirectional or unidirectional data transfer.
+///
+/// `QuicStream` represents a single stream within a QUIC connection. Streams provide
+/// ordered, reliable data transfer and can be either bidirectional or unidirectional.
+///
+/// ## Sending Data
+///
+/// Use ``send(_:flags:)`` to send data on the stream:
+///
+/// ```swift
+/// let stream = try connection.openStream()
+/// try await stream.start()
+///
+/// try await stream.send(Data("Hello".utf8))
+/// try await stream.send(Data("World".utf8), flags: .fin) // Last message
+/// ```
+///
+/// ## Receiving Data
+///
+/// Use the ``receive`` property to iterate over incoming data:
+///
+/// ```swift
+/// for try await data in stream.receive {
+///     print("Received: \(String(data: data, encoding: .utf8) ?? "?")")
+/// }
+/// ```
+///
+/// ## Topics
+///
+/// ### Creating Streams
+///
+/// Streams are created through ``QuicConnection/openStream(flags:)`` or received
+/// via ``QuicConnection/onPeerStreamStarted(_:)``.
+///
+/// ### Managing Stream Lifecycle
+///
+/// - ``start(flags:)``
+/// - ``shutdown(errorCode:)``
+/// - ``shutdownSend(errorCode:)``
+/// - ``shutdownReceive(errorCode:)``
+/// - ``state``
+///
+/// ### Data Transfer
+///
+/// - ``send(_:flags:)``
+/// - ``receive``
 public final class QuicStream: QuicObject {
-    
+
+    /// The current state of the stream.
     public enum State: Sendable {
+        /// Stream has been created but not started.
         case idle
+        /// Stream is in the process of starting.
         case starting
+        /// Stream is open and ready for data transfer.
         case open
+        /// Stream is shutting down.
         case shuttingDown
+        /// Stream has been closed.
         case closed
     }
     
@@ -27,10 +79,15 @@ public final class QuicStream: QuicObject {
     }
     private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
     
+    /// The current state of the stream.
     public var state: State {
         internalState.withLock { $0.streamState }
     }
-    
+
+    /// The connection this stream belongs to, if known.
+    ///
+    /// This is `nil` for streams received from a peer, as they are created
+    /// with just the handle.
     public let connection: QuicConnection?
     
     private class SendContext {
@@ -57,7 +114,17 @@ public final class QuicStream: QuicObject {
     }
     
     private var _receiveStream: AsyncThrowingStream<Data, Error>?
-    
+
+    /// An asynchronous stream of data received from the peer.
+    ///
+    /// Iterate over this property to receive data sent by the remote peer.
+    /// The stream completes when the peer finishes sending or aborts.
+    ///
+    /// ```swift
+    /// for try await data in stream.receive {
+    ///     // Process received data
+    /// }
+    /// ```
     public var receive: AsyncThrowingStream<Data, Error> {
         internalState.withLock { state in
             if let existing = _receiveStream {
@@ -123,6 +190,13 @@ public final class QuicStream: QuicObject {
         internalState.withLock { $0.receiveContinuation = continuation }
     }
     
+    /// Starts the stream.
+    ///
+    /// Call this method after creating a stream with ``QuicConnection/openStream(flags:)``
+    /// to begin using the stream.
+    ///
+    /// - Parameter flags: Flags controlling stream start behavior.
+    /// - Throws: ``QuicError`` if the stream cannot be started.
     public func start(flags: QuicStreamStartFlags = .none) async throws {
         guard let handle = handle else { throw QuicError.invalidState }
         
@@ -150,6 +224,14 @@ public final class QuicStream: QuicObject {
         }
     }
     
+    /// Sends data on the stream.
+    ///
+    /// This method queues data for sending and returns when the send is complete.
+    ///
+    /// - Parameters:
+    ///   - data: The data to send.
+    ///   - flags: Flags controlling send behavior. Use `.fin` to indicate this is the last send.
+    /// - Throws: ``QuicError`` if the send fails.
     public func send(_ data: Data, flags: QuicSendFlags = .none) async throws {
         guard let handle = handle else { throw QuicError.invalidState }
         
@@ -174,15 +256,20 @@ public final class QuicStream: QuicObject {
         }
     }
     
+    /// Aborts the stream in both directions.
+    ///
+    /// This immediately terminates the stream, aborting any pending sends and receives.
+    ///
+    /// - Parameter errorCode: An optional application-defined error code to send to the peer.
     public func shutdown(errorCode: UInt64 = 0) async {
         guard let handle = handle else { return }
-        
+
         await withCheckedContinuation { continuation in
             internalState.withLock {
                 $0.shutdownContinuation = continuation
                 $0.streamState = .shuttingDown
             }
-            
+
             _ = api.StreamShutdown(
                 handle,
                 QUIC_STREAM_SHUTDOWN_FLAG_ABORT,
@@ -190,12 +277,23 @@ public final class QuicStream: QuicObject {
             )
         }
     }
-    
+
+    /// Gracefully shuts down the send direction of the stream.
+    ///
+    /// This signals to the peer that no more data will be sent (FIN).
+    /// Any pending sends will be completed before the shutdown takes effect.
+    ///
+    /// - Parameter errorCode: An optional application-defined error code.
     public func shutdownSend(errorCode: UInt64 = 0) {
         guard let handle = handle else { return }
         _ = api.StreamShutdown(handle, QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, errorCode)
     }
-    
+
+    /// Aborts the receive direction of the stream.
+    ///
+    /// This signals to the peer that no more data will be accepted.
+    ///
+    /// - Parameter errorCode: An optional application-defined error code to send to the peer.
     public func shutdownReceive(errorCode: UInt64 = 0) {
         guard let handle = handle else { return }
         _ = api.StreamShutdown(handle, QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE, errorCode)

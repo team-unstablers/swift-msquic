@@ -8,9 +8,51 @@
 import Foundation
 import MsQuic
 
+/// Configuration for QUIC connections and listeners.
+///
+/// `QuicConfiguration` holds the ALPN protocols, TLS credentials, and QUIC settings
+/// used by connections and listeners. Each configuration is associated with a
+/// ``QuicRegistration``.
+///
+/// ## Creating a Configuration
+///
+/// ```swift
+/// var settings = QuicSettings()
+/// settings.idleTimeoutMs = 30000
+///
+/// let config = try QuicConfiguration(
+///     registration: registration,
+///     alpnBuffers: ["my-protocol"],
+///     settings: settings
+/// )
+///
+/// // Load TLS credentials
+/// try config.loadCredential(.init(
+///     type: .certificateFile(certPath: "server.crt", keyPath: "server.key"),
+///     flags: []
+/// ))
+/// ```
+///
+/// ## Topics
+///
+/// ### Creating Configurations
+///
+/// - ``init(registration:alpnBuffers:settings:)``
+///
+/// ### Loading Credentials
+///
+/// - ``loadCredential(_:)``
 public final class QuicConfiguration: QuicObject {
+    /// The registration this configuration belongs to.
     public let registration: QuicRegistration
-    
+
+    /// Creates a new configuration.
+    ///
+    /// - Parameters:
+    ///   - registration: The registration to associate with this configuration.
+    ///   - alpnBuffers: The list of supported ALPN protocol names.
+    ///   - settings: Optional QUIC settings. If `nil`, default settings are used.
+    /// - Throws: ``QuicError`` if the configuration cannot be created.
     public init(
         registration: QuicRegistration,
         alpnBuffers: [String],
@@ -58,6 +100,14 @@ public final class QuicConfiguration: QuicObject {
         }
     }
     
+    /// Loads TLS credentials into this configuration.
+    ///
+    /// Call this method after creating the configuration to set up TLS.
+    /// For servers, this typically involves loading a certificate and private key.
+    /// For clients, this may involve setting up certificate validation options.
+    ///
+    /// - Parameter credential: The credential configuration to load.
+    /// - Throws: ``QuicError`` if the credentials cannot be loaded.
     public func loadCredential(_ credential: QuicCredentialConfig) throws {
         guard let handle = handle else { throw QuicError.invalidState }
         

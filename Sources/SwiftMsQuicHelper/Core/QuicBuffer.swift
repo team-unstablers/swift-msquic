@@ -8,17 +8,33 @@
 import Foundation
 import MsQuic
 
+/// A buffer for passing data to MsQuic APIs.
+///
+/// `QuicBuffer` wraps Swift `Data` and provides a safe way to pass buffers
+/// to the underlying MsQuic C API.
 public struct QuicBuffer {
+    /// The underlying data.
     public let data: Data
-    
+
+    /// Creates a buffer from `Data`.
+    ///
+    /// - Parameter data: The data to wrap.
     public init(_ data: Data) {
         self.data = data
     }
-    
+
+    /// Creates a buffer from a byte array.
+    ///
+    /// - Parameter bytes: The bytes to wrap.
     public init(_ bytes: [UInt8]) {
         self.data = Data(bytes)
     }
-    
+
+    /// Creates a buffer from a string.
+    ///
+    /// - Parameters:
+    ///   - string: The string to convert.
+    ///   - encoding: The string encoding to use (default: UTF-8).
     public init(_ string: String, encoding: String.Encoding = .utf8) {
         self.data = string.data(using: encoding) ?? Data()
     }

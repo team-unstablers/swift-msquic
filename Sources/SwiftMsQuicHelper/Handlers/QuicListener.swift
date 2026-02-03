@@ -9,18 +9,71 @@ import Foundation
 import MsQuic
 import os
 
+/// A QUIC listener that accepts incoming connections from clients.
+///
+/// `QuicListener` listens for incoming QUIC connections on a specified address and port.
+/// Use it to build QUIC servers that accept multiple client connections.
+///
+/// ## Setting Up a Server
+///
+/// ```swift
+/// let listener = try QuicListener(registration: registration)
+///
+/// listener.onNewConnection { listener, info in
+///     print("New connection from \(info.remoteAddress)")
+///
+///     let connection = try QuicConnection(
+///         handle: info.connection,
+///         configuration: configuration
+///     ) { conn, stream in
+///         // Handle incoming streams
+///     }
+///
+///     return connection
+/// }
+///
+/// try listener.start(alpnBuffers: ["my-protocol"], localAddress: QuicAddress(port: 443))
+/// ```
+///
+/// ## Topics
+///
+/// ### Creating Listeners
+///
+/// - ``init(registration:)``
+///
+/// ### Managing Listener Lifecycle
+///
+/// - ``start(alpnBuffers:localAddress:)``
+/// - ``stop()``
+///
+/// ### Handling Connections
+///
+/// - ``onNewConnection(_:)``
+/// - ``ConnectionHandler``
 public final class QuicListener: QuicObject {
+    /// The registration this listener belongs to.
     public let registration: QuicRegistration
-    
+
+    /// A handler for processing incoming connections.
+    ///
+    /// - Parameters:
+    ///   - listener: The listener that received the connection.
+    ///   - info: Information about the incoming connection.
+    /// - Returns: A ``QuicConnection`` to accept the connection, or `nil` to reject it.
+    /// - Throws: If the connection should be rejected with an error.
     public typealias ConnectionHandler = (QuicListener, QuicListenerEvent.NewConnectionInfo) throws -> QuicConnection?
     
     private var connectionHandler: ConnectionHandler?
-    
+
     private struct State: Sendable {
         var stopContinuation: CheckedContinuation<Void, Never>?
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
-    
+
+    /// Creates a new listener.
+    ///
+    /// - Parameter registration: The registration to associate with this listener.
+    /// - Throws: ``QuicError/invalidState`` if the registration handle is invalid.
     public init(registration: QuicRegistration) throws {
         self.registration = registration
         super.init()
@@ -43,6 +96,15 @@ public final class QuicListener: QuicObject {
         retainSelfForCallback()
     }
     
+    /// Starts the listener to accept incoming connections.
+    ///
+    /// After calling this method, the listener will begin accepting connections
+    /// from clients that connect with one of the specified ALPN protocols.
+    ///
+    /// - Parameters:
+    ///   - alpnBuffers: The list of supported ALPN protocol names.
+    ///   - localAddress: The local address and port to listen on. If `nil`, listens on all interfaces.
+    /// - Throws: ``QuicError`` if the listener cannot be started.
     public func start(alpnBuffers: [String], localAddress: QuicAddress? = nil) throws {
         guard let handle = handle else { throw QuicError.invalidState }
         
@@ -73,18 +135,29 @@ public final class QuicListener: QuicObject {
         }
     }
     
+    /// Stops the listener.
+    ///
+    /// After this method returns, no new connections will be accepted.
+    /// Existing connections are not affected.
     public func stop() async {
         guard let handle = handle else { return }
-        
+
         await withCheckedContinuation { continuation in
             state.withLock {
                 $0.stopContinuation = continuation
             }
-            
+
             api.ListenerStop(handle)
         }
     }
-    
+
+    /// Sets a handler for new incoming connections.
+    ///
+    /// This handler is called when a new client connection is received.
+    /// Return a configured ``QuicConnection`` to accept the connection,
+    /// or `nil` to reject it.
+    ///
+    /// - Parameter handler: A closure that decides whether to accept each connection.
     public func onNewConnection(_ handler: @escaping ConnectionHandler) {
         self.connectionHandler = handler
     }

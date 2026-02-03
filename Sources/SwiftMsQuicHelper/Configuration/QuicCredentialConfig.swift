@@ -8,37 +8,106 @@
 import Foundation
 import MsQuic
 
+/// The type of TLS credential to use.
+///
+/// Use this enum to specify how TLS credentials are provided to MsQuic.
 public enum QuicCredentialType {
-    /// Certificate file path (PEM etc) and private key path
+    /// Certificate and private key from file paths.
+    ///
+    /// - Parameters:
+    ///   - certPath: Path to the certificate file (PEM or other supported format).
+    ///   - keyPath: Path to the private key file.
     case certificateFile(certPath: String, keyPath: String)
-    
-    /// PKCS#12 blob (ASN.1)
+
+    /// Certificate and private key from a PKCS#12 blob.
+    ///
+    /// - Parameters:
+    ///   - blob: The PKCS#12 data (ASN.1 encoded).
+    ///   - password: Optional password to decrypt the PKCS#12 data.
     case certificatePkcs12(blob: Data, password: String?)
-    
-    /// No certificate (Client mode, or when using system store implicitly if supported later)
+
+    /// No certificate.
+    ///
+    /// Use this for client connections or when certificates are not required.
     case none
 }
 
+/// Flags that control TLS credential behavior.
+///
+/// Combine these flags to customize how credentials are loaded and validated.
 public struct QuicCredentialFlags: OptionSet, Sendable {
     public let rawValue: UInt32
-    
+
     public init(rawValue: UInt32) {
         self.rawValue = rawValue
     }
-    
+
+    /// No special flags.
     public static let none = QuicCredentialFlags([])
+
+    /// Indicates this is a client-side credential.
+    ///
+    /// Required when loading credentials for client connections.
     public static let client = QuicCredentialFlags(rawValue: UInt32(QUIC_CREDENTIAL_FLAG_CLIENT.rawValue))
+
+    /// Load credentials asynchronously.
+    ///
+    /// - Note: Not currently supported by this wrapper.
     public static let loadAsynchronous = QuicCredentialFlags(rawValue: UInt32(QUIC_CREDENTIAL_FLAG_LOAD_ASYNCHRONOUS.rawValue))
+
+    /// Disable certificate validation.
+    ///
+    /// - Warning: Only use this for testing. Never disable certificate validation in production.
     public static let noCertificateValidation = QuicCredentialFlags(rawValue: UInt32(QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION.rawValue))
+
+    /// Receive an event when the peer's certificate is received.
     public static let indicateCertificateReceived = QuicCredentialFlags(rawValue: UInt32(QUIC_CREDENTIAL_FLAG_INDICATE_CERTIFICATE_RECEIVED.rawValue))
+
+    /// Defer certificate validation to the application.
     public static let deferCertificateValidation = QuicCredentialFlags(rawValue: UInt32(QUIC_CREDENTIAL_FLAG_DEFER_CERTIFICATE_VALIDATION.rawValue))
+
+    /// Require the client to provide a certificate (server-side).
     public static let requireClientAuthentication = QuicCredentialFlags(rawValue: UInt32(QUIC_CREDENTIAL_FLAG_REQUIRE_CLIENT_AUTHENTICATION.rawValue))
 }
 
+/// Configuration for TLS credentials.
+///
+/// This structure combines a ``QuicCredentialType`` with ``QuicCredentialFlags``
+/// to fully specify how TLS should be configured.
+///
+/// ## Server Example
+///
+/// ```swift
+/// try config.loadCredential(.init(
+///     type: .certificateFile(certPath: "server.crt", keyPath: "server.key"),
+///     flags: []
+/// ))
+/// ```
+///
+/// ## Client Example
+///
+/// ```swift
+/// // Normal client with certificate validation
+/// try config.loadCredential(.init(type: .none, flags: [.client]))
+///
+/// // Testing client without certificate validation
+/// try config.loadCredential(.init(
+///     type: .none,
+///     flags: [.client, .noCertificateValidation]
+/// ))
+/// ```
 public struct QuicCredentialConfig {
+    /// The type of credential (certificate file, PKCS#12, or none).
     public let type: QuicCredentialType
+
+    /// Flags controlling credential behavior.
     public let flags: QuicCredentialFlags
-    
+
+    /// Creates a new credential configuration.
+    ///
+    /// - Parameters:
+    ///   - type: The type of credential to use.
+    ///   - flags: Flags controlling credential behavior.
     public init(type: QuicCredentialType, flags: QuicCredentialFlags = []) {
         self.type = type
         self.flags = flags

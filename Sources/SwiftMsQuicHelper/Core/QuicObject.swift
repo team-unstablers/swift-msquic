@@ -8,16 +8,24 @@
 import Foundation
 import MsQuic
 
+/// Base class for all QUIC handle wrappers.
+///
+/// `QuicObject` provides common functionality for all QUIC objects, including
+/// handle management and self-retention for callback safety.
+///
+/// - Note: This class is typically not used directly. Use the concrete subclasses
+///   like ``QuicConnection``, ``QuicStream``, or ``QuicListener`` instead.
 open class QuicObject: CInteropHandle {
     /// Internal MsQuic Handle
     internal var handle: HQUIC?
-    
+
     /// Convenience accessor for the API table
     internal var api: QUIC_API_TABLE { SwiftMsQuicAPI.MsQuic }
-    
+
     private let retainLock = NSLock()
     private var retainedSelf: Unmanaged<AnyObject>?
-    
+
+    /// Whether this object has a valid handle.
     public var isValid: Bool { handle != nil }
     
     public init() {
