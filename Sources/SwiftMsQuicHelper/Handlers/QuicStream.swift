@@ -224,6 +224,7 @@ public final class QuicStream: QuicObject {
             internalState.withLock { $0.receiveContinuation }?.yield(data)
             if let handle = handle {
                 api.StreamReceiveComplete(handle, totalLength)
+                return .pending
             }
             
         case .sendComplete(let canceled, let context):
