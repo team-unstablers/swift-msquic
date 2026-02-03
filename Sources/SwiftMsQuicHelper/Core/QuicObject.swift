@@ -15,6 +15,9 @@ open class QuicObject: CInteropHandle {
     /// Convenience accessor for the API table
     internal var api: QUIC_API_TABLE { SwiftMsQuicAPI.MsQuic }
     
+    private let retainLock = NSLock()
+    private var retainedSelf: Unmanaged<AnyObject>?
+    
     public var isValid: Bool { handle != nil }
     
     public init() {
@@ -34,5 +37,23 @@ open class QuicObject: CInteropHandle {
         //
         // NOTE: We cannot enforce subclasses to call close() here. 
         // Subclasses SHOULD implement deinit { close() } or similar.
+    }
+    
+    /// Retain self for callback lifetime to avoid use-after-free.
+    internal func retainSelfForCallback() {
+        retainLock.lock()
+        defer { retainLock.unlock() }
+        guard retainedSelf == nil else { return }
+        retainedSelf = Unmanaged.passRetained(self as AnyObject)
+    }
+    
+    /// Release previously retained self. Safe to call multiple times.
+    internal func releaseSelfFromCallback() {
+        retainLock.lock()
+        let retained = retainedSelf
+        retainedSelf = nil
+        retainLock.unlock()
+        
+        retained?.release()
     }
 }
