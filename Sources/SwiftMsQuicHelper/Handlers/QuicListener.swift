@@ -12,7 +12,7 @@ import os
 public final class QuicListener: QuicObject {
     public let registration: QuicRegistration
     
-    public typealias ConnectionHandler = (QuicListener, QuicListenerEvent.NewConnectionInfo) async throws -> QuicConnection?
+    public typealias ConnectionHandler = (QuicListener, QuicListenerEvent.NewConnectionInfo) throws -> QuicConnection?
     
     private var connectionHandler: ConnectionHandler?
     
@@ -40,6 +40,7 @@ public final class QuicListener: QuicObject {
         )
         try status.throwIfFailed()
         self.handle = handle
+        retainSelfForCallback()
     }
     
     public func start(alpnBuffers: [String], localAddress: QuicAddress? = nil) throws {
@@ -96,27 +97,18 @@ public final class QuicListener: QuicObject {
             guard let handler = connectionHandler else {
                 return .connectionRefused
             }
-            
-            // Set callback handler with nil context to satisfy MsQuic assertion when returning PENDING.
-            // This prevents the "App MUST set callback handler or close connection!" assertion.
-            typealias ConnectionCallback = @convention(c) (HQUIC?, UnsafeMutableRawPointer?, UnsafeMutablePointer<QUIC_CONNECTION_EVENT>?) -> QuicStatusRawValue
-            let callback = quicConnectionCallback as ConnectionCallback
-            let callbackPtr = unsafeBitCast(callback, to: UnsafeMutableRawPointer.self)
-            api.SetCallbackHandler(info.connection, callbackPtr, nil)
-            
-            Task {
-                do {
-                    if let _ = try await handler(self, info) {
-                        // Accepted
-                    } else {
-                        // Rejected
-                        api.ConnectionClose(info.connection)
-                    }
-                } catch {
-                    api.ConnectionClose(info.connection)
+            do {
+                if let _ = try handler(self, info) {
+                    // Accepted
+                    return .success
                 }
+                // Rejected
+                api.ConnectionClose(info.connection)
+                return .connectionRefused
+            } catch {
+                api.ConnectionClose(info.connection)
+                return .connectionRefused
             }
-            return .pending
             
         case .stopComplete:
             let continuation = state.withLock {
@@ -125,6 +117,9 @@ public final class QuicListener: QuicObject {
                 return c
             }
             continuation?.resume()
+            Task {
+                self.releaseSelfFromCallback()
+            }
             return .success
             
         default:
