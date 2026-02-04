@@ -26,6 +26,14 @@ public enum QuicCredentialType {
     ///   - password: Optional password to decrypt the PKCS#12 data.
     case certificatePkcs12(blob: Data, password: String?)
 
+    /// Certificate and private key from PEM strings (in-memory).
+    ///
+    /// - Parameters:
+    ///   - key: The private key in PEM format.
+    ///   - cert: The certificate (and chain) in PEM format.
+    ///   - password: Optional password if the private key is encrypted.
+    case certificatePem(key: String, cert: String, password: String?)
+
     /// No certificate.
     ///
     /// Use this for client connections or when certificates are not required.
@@ -160,6 +168,32 @@ public struct QuicCredentialConfig {
                     return try withUnsafeMutablePointer(to: &pkcs12) { pkcs12Ptr in
                         config.CertificatePkcs12 = pkcs12Ptr
                         return try body(&config)
+                    }
+                }
+            }
+
+        case .certificatePem(let key, let cert, let password):
+            config.Type = QUIC_CREDENTIAL_TYPE_CERTIFICATE_PEM
+
+            guard let keyData = key.data(using: .utf8),
+                  let certData = cert.data(using: .utf8) else {
+                throw QuicError.invalidParameter
+            }
+
+            return try keyData.withUnsafeBytes { keyBuffer in
+                return try certData.withUnsafeBytes { certBuffer in
+                    return try (password ?? "").withCString { pwdPtr in
+                        var pem = QUIC_CERTIFICATE_PEM(
+                            PrivateKeyPem: keyBuffer.bindMemory(to: UInt8.self).baseAddress,
+                            PrivateKeyPemLength: UInt32(keyData.count),
+                            PrivateKeyPassword: password != nil ? pwdPtr : nil,
+                            CertificatePem: certBuffer.bindMemory(to: UInt8.self).baseAddress,
+                            CertificatePemLength: UInt32(certData.count)
+                        )
+                        return try withUnsafeMutablePointer(to: &pem) { pemPtr in
+                            config.CertificatePem = pemPtr
+                            return try body(&config)
+                        }
                     }
                 }
             }
