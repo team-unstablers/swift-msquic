@@ -134,8 +134,8 @@ public final class QuicConnection: QuicObject {
     /// - Returns: A status indicating whether to accept or reject the certificate.
     public typealias CertificateValidationHandler = (
         _ connection: QuicConnection,
-        _ certificate: UnsafeMutableRawPointer?,
-        _ chain: UnsafeMutableRawPointer?,
+        _ certificate: QuicCertificate,
+        _ chain: [QuicCertificate],
         _ deferredErrorFlags: QuicCertificateValidationFlags,
         _ deferredStatus: QuicStatus
     ) -> QuicStatus

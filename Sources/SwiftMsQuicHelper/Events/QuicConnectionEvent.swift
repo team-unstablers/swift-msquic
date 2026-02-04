@@ -128,8 +128,8 @@ public enum QuicConnectionEvent {
     /// - Important: The `certificate` and `chain` pointers are only valid during the event callback.
     ///   If you need to retain the certificate data, copy it before the callback returns.
     case peerCertificateReceived(
-        certificate: UnsafeMutableRawPointer?,
-        chain: UnsafeMutableRawPointer?,
+        certificate: QuicCertificate,
+        chain: [QuicCertificate],
         deferredErrorFlags: QuicCertificateValidationFlags,
         deferredStatus: QuicStatus
     )

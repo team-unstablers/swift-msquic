@@ -8,6 +8,11 @@
 import Foundation
 import MsQuic
 
+#if canImport(Security)
+import Security
+import SwiftMsQuicOpenSSLUtils
+#endif
+
 internal enum QuicEventConverter {
     static func convert(_ event: QUIC_LISTENER_EVENT) -> QuicListenerEvent {
         switch event.Type {
@@ -114,12 +119,33 @@ internal enum QuicEventConverter {
             
         case QUIC_CONNECTION_EVENT_PEER_CERTIFICATE_RECEIVED:
             let cert = event.PEER_CERTIFICATE_RECEIVED
+            
+#if canImport(Security)
+            // FIXME
+            
+            let certificate = try! CertBridge.copySecCertificate(fromOpenSSLX509: cert.Certificate).takeRetainedValue()
+            let cfCertChain = try! CertBridge.copySecCertificateArray(fromOpenSSLStackX509: cert.Certificate).takeRetainedValue()
+            
+            var chain: [QuicCertificate] = []
+            
+            if let casted = ((cfCertChain as NSArray) as? [QuicCertificate]) {
+                chain = casted
+            }
+            
+            return .peerCertificateReceived(
+                certificate: certificate,
+                chain: chain,
+                deferredErrorFlags: QuicCertificateValidationFlags(rawValue: cert.DeferredErrorFlags),
+                deferredStatus: QuicStatus(cert.DeferredStatus)
+            )
+#else
             return .peerCertificateReceived(
                 certificate: cert.Certificate,
                 chain: cert.Chain,
                 deferredErrorFlags: QuicCertificateValidationFlags(rawValue: cert.DeferredErrorFlags),
                 deferredStatus: QuicStatus(cert.DeferredStatus)
             )
+#endif
             
         default:
             return .unknown
