@@ -7,6 +7,7 @@
 
 import Foundation
 import MsQuic
+import os
 
 /// Base class for all QUIC handle wrappers.
 ///
@@ -22,8 +23,10 @@ open class QuicObject: CInteropHandle {
     /// Convenience accessor for the API table
     internal var api: QUIC_API_TABLE { SwiftMsQuicAPI.MsQuic }
 
-    private let retainLock = NSLock()
-    private var retainedSelf: Unmanaged<AnyObject>?
+    private struct RetainState: @unchecked Sendable {
+        var retainedSelf: Unmanaged<AnyObject>?
+    }
+    private let retainState = OSAllocatedUnfairLock(initialState: RetainState())
 
     /// Whether this object has a valid handle.
     public var isValid: Bool { handle != nil }
@@ -49,19 +52,19 @@ open class QuicObject: CInteropHandle {
     
     /// Retain self for callback lifetime to avoid use-after-free.
     internal func retainSelfForCallback() {
-        retainLock.lock()
-        defer { retainLock.unlock() }
-        guard retainedSelf == nil else { return }
-        retainedSelf = Unmanaged.passRetained(self as AnyObject)
+        retainState.withLock { state in
+            guard state.retainedSelf == nil else { return }
+            state.retainedSelf = Unmanaged.passRetained(self as AnyObject)
+        }
     }
     
     /// Release previously retained self. Safe to call multiple times.
     internal func releaseSelfFromCallback() {
-        retainLock.lock()
-        let retained = retainedSelf
-        retainedSelf = nil
-        retainLock.unlock()
-        
+        let retained = retainState.withLock { state -> Unmanaged<AnyObject>? in
+            let retained = state.retainedSelf
+            state.retainedSelf = nil
+            return retained
+        }
         retained?.release()
     }
 }
