@@ -107,7 +107,7 @@ public final class QuicConnection: QuicObject {
     /// - Parameters:
     ///   - connection: The connection that received the stream.
     ///   - stream: The new stream initiated by the peer.
-    public typealias StreamHandler = (QuicConnection, QuicStream) async -> Void
+    public typealias StreamHandler = @Sendable (QuicConnection, QuicStream) async -> Void
 
     /// A handler for processing connection events.
     ///
@@ -115,7 +115,7 @@ public final class QuicConnection: QuicObject {
     ///   - connection: The connection that received the event.
     ///   - event: The event that occurred.
     /// - Returns: A status indicating how the event was handled.
-    public typealias EventHandler = (QuicConnection, QuicConnectionEvent) -> QuicStatus
+    public typealias EventHandler = @Sendable (QuicConnection, QuicConnectionEvent) -> QuicStatus
 
     /// A handler for validating the peer's certificate.
     ///
@@ -134,7 +134,7 @@ public final class QuicConnection: QuicObject {
     ///   - deferredErrorFlags: Bit flags indicating validation errors (Schannel only).
     ///   - deferredStatus: The validation error status from the TLS layer.
     /// - Returns: A status indicating whether to accept or reject the certificate.
-    public typealias CertificateValidationHandler = (
+    public typealias CertificateValidationHandler = @Sendable (
         _ connection: QuicConnection,
         _ certificate: QuicCertificate,
         _ chain: [QuicCertificate],

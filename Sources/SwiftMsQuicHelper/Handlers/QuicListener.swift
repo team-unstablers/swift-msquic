@@ -61,7 +61,7 @@ public final class QuicListener: QuicObject {
     ///   - info: Information about the incoming connection.
     /// - Returns: A ``QuicConnection`` to accept the connection, or `nil` to reject it.
     /// - Throws: If the connection should be rejected with an error.
-    public typealias ConnectionHandler = (QuicListener, QuicListenerEvent.NewConnectionInfo) throws -> QuicConnection?
+    public typealias ConnectionHandler = @Sendable (QuicListener, QuicListenerEvent.NewConnectionInfo) throws -> QuicConnection?
     
     private struct InternalState: @unchecked Sendable {
         var stopContinuation: CheckedContinuation<Void, Never>?
