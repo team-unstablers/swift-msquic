@@ -50,7 +50,7 @@ import os
 ///
 /// - ``onNewConnection(_:)``
 /// - ``ConnectionHandler``
-public final class QuicListener: QuicObject {
+public final class QuicListener: QuicObject, @unchecked Sendable {
     /// The registration this listener belongs to.
     public let registration: QuicRegistration
 
@@ -61,14 +61,13 @@ public final class QuicListener: QuicObject {
     ///   - info: Information about the incoming connection.
     /// - Returns: A ``QuicConnection`` to accept the connection, or `nil` to reject it.
     /// - Throws: If the connection should be rejected with an error.
-    public typealias ConnectionHandler = (QuicListener, QuicListenerEvent.NewConnectionInfo) throws -> QuicConnection?
+    public typealias ConnectionHandler = @Sendable (QuicListener, QuicListenerEvent.NewConnectionInfo) throws -> QuicConnection?
     
-    private var connectionHandler: ConnectionHandler?
-
-    private struct State: Sendable {
+    private struct InternalState: @unchecked Sendable {
         var stopContinuation: CheckedContinuation<Void, Never>?
+        var connectionHandler: ConnectionHandler?
     }
-    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
 
     /// Creates a new listener.
     ///
@@ -143,7 +142,7 @@ public final class QuicListener: QuicObject {
         guard let handle = handle else { return }
 
         await withCheckedContinuation { continuation in
-            state.withLock {
+            internalState.withLock {
                 $0.stopContinuation = continuation
             }
 
@@ -159,7 +158,9 @@ public final class QuicListener: QuicObject {
     ///
     /// - Parameter handler: A closure that decides whether to accept each connection.
     public func onNewConnection(_ handler: @escaping ConnectionHandler) {
-        self.connectionHandler = handler
+        internalState.withLock {
+            $0.connectionHandler = handler
+        }
     }
     
     internal func handleEvent(_ event: QUIC_LISTENER_EVENT) -> QuicStatus {
@@ -167,7 +168,8 @@ public final class QuicListener: QuicObject {
         
         switch swiftEvent {
         case .newConnection(let info):
-            guard let handler = connectionHandler else {
+            let handler = internalState.withLock { $0.connectionHandler }
+            guard let handler else {
                 return .connectionRefused
             }
             do {
@@ -184,7 +186,7 @@ public final class QuicListener: QuicObject {
             }
             
         case .stopComplete:
-            let continuation = state.withLock {
+            let continuation = internalState.withLock {
                 let c = $0.stopContinuation
                 $0.stopContinuation = nil
                 return c
