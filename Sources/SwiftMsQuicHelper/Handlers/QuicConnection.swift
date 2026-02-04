@@ -86,6 +86,7 @@ public final class QuicConnection: QuicObject {
         var connectionState: State = .idle
         var connectContinuation: CheckedContinuation<Void, Error>?
         var shutdownContinuation: CheckedContinuation<Void, Never>?
+        var shutdownThrowingContinuation: CheckedContinuation<Void, Error>?
     }
     
     private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
@@ -284,6 +285,62 @@ public final class QuicConnection: QuicObject {
             )
         }
     }
+
+    /// Gracefully shuts down the connection with a timeout.
+    ///
+    /// This method waits for the shutdown to complete up to the specified timeout.
+    /// If the timeout expires and `force` is `true`, the connection is force-closed.
+    ///
+    /// - Parameters:
+    ///   - errorCode: An optional application-defined error code to send to the peer.
+    ///   - timeoutMs: Maximum time to wait for shutdown completion, in milliseconds.
+    ///   - force: If `true`, force-close the connection when the timeout expires.
+    /// - Throws: ``QuicError/connectionTimeout`` if the timeout expires before shutdown completes.
+    public func shutdown(errorCode: UInt64 = 0, timeoutMs: UInt64, force: Bool = true) async throws {
+        guard let handle = handle else { return }
+
+        let shouldReturn = internalState.withLock { state -> Bool in
+            if state.connectionState == .closed { return true }
+            state.connectionState = .shuttingDown
+            return false
+        }
+        if shouldReturn { return }
+
+        try await withCheckedThrowingContinuation { continuation in
+            internalState.withLock {
+                $0.shutdownThrowingContinuation = continuation
+            }
+
+            api.ConnectionShutdown(
+                handle,
+                QUIC_CONNECTION_SHUTDOWN_FLAG_NONE,
+                errorCode
+            )
+
+            Task.detached(priority: .utility) { [weak self] in
+                guard let self else { return }
+                do {
+                    try await Task.sleep(nanoseconds: timeoutMs * 1_000_000)
+                } catch {
+                    return
+                }
+
+                var continuationToResume: CheckedContinuation<Void, Error>?
+                self.internalState.withLock { state in
+                    continuationToResume = state.shutdownThrowingContinuation
+                    if continuationToResume != nil {
+                        state.shutdownThrowingContinuation = nil
+                    }
+                }
+
+                guard let continuationToResume else { return }
+                continuationToResume.resume(throwing: QuicError.connectionTimeout)
+
+                guard force, let handle = self.handle else { return }
+                self.api.ConnectionClose(handle)
+            }
+        }
+    }
     
     /// Opens a new stream on this connection.
     ///
@@ -397,17 +454,20 @@ public final class QuicConnection: QuicObject {
             continuation?.resume(throwing: QuicError.aborted)
             
         case .shutdownComplete:
-            let (shutdownContinuation, connectContinuation) = internalState.withLock { state -> (CheckedContinuation<Void, Never>?, CheckedContinuation<Void, Error>?) in
+            let (shutdownContinuation, shutdownThrowingContinuation, connectContinuation) = internalState.withLock { state -> (CheckedContinuation<Void, Never>?, CheckedContinuation<Void, Error>?, CheckedContinuation<Void, Error>?) in
                 state.connectionState = .closed
                 let sc = state.shutdownContinuation
                 state.shutdownContinuation = nil
-                
+                let stc = state.shutdownThrowingContinuation
+                state.shutdownThrowingContinuation = nil
+
                 let cc = state.connectContinuation
                 state.connectContinuation = nil
-                
-                return (sc, cc)
+
+                return (sc, stc, cc)
             }
             shutdownContinuation?.resume()
+            shutdownThrowingContinuation?.resume()
             connectContinuation?.resume(throwing: QuicError.aborted)
             
             Task {
