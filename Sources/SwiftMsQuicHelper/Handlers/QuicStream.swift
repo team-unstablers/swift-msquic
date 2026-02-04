@@ -55,7 +55,7 @@ import os
 ///
 /// - ``send(_:flags:)``
 /// - ``receive``
-public final class QuicStream: QuicObject {
+public final class QuicStream: QuicObject, @unchecked Sendable {
 
     /// The current state of the stream.
     public enum State: Sendable {

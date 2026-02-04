@@ -50,7 +50,7 @@ import os
 ///
 /// - ``onNewConnection(_:)``
 /// - ``ConnectionHandler``
-public final class QuicListener: QuicObject {
+public final class QuicListener: QuicObject, @unchecked Sendable {
     /// The registration this listener belongs to.
     public let registration: QuicRegistration
 

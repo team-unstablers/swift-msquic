@@ -67,7 +67,7 @@ import os
 /// - ``State``
 /// - ``StreamHandler``
 /// - ``EventHandler``
-public final class QuicConnection: QuicObject {
+public final class QuicConnection: QuicObject, @unchecked Sendable {
     /// The current state of the connection.
     public enum State: Sendable {
         /// Connection has been created but not started.
