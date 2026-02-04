@@ -82,11 +82,14 @@ public final class QuicConnection: QuicObject {
         case closed
     }
     
-    private struct InternalState: Sendable {
+    private struct InternalState: @unchecked Sendable {
         var connectionState: State = .idle
         var connectContinuation: CheckedContinuation<Void, Error>?
         var shutdownContinuation: CheckedContinuation<Void, Never>?
         var shutdownThrowingContinuation: CheckedContinuation<Void, Error>?
+        var peerStreamHandler: StreamHandler?
+        var eventHandler: EventHandler?
+        var certificateValidationHandler: CertificateValidationHandler?
     }
     
     private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
@@ -105,7 +108,6 @@ public final class QuicConnection: QuicObject {
     ///   - connection: The connection that received the stream.
     ///   - stream: The new stream initiated by the peer.
     public typealias StreamHandler = (QuicConnection, QuicStream) async -> Void
-    private var peerStreamHandler: StreamHandler?
 
     /// A handler for processing connection events.
     ///
@@ -114,7 +116,6 @@ public final class QuicConnection: QuicObject {
     ///   - event: The event that occurred.
     /// - Returns: A status indicating how the event was handled.
     public typealias EventHandler = (QuicConnection, QuicConnectionEvent) -> QuicStatus
-    private var eventHandler: EventHandler?
 
     /// A handler for validating the peer's certificate.
     ///
@@ -140,7 +141,6 @@ public final class QuicConnection: QuicObject {
         _ deferredErrorFlags: QuicCertificateValidationFlags,
         _ deferredStatus: QuicStatus
     ) -> QuicStatus
-    private var certificateValidationHandler: CertificateValidationHandler?
 
     /// Creates a new client-side connection.
     ///
@@ -186,7 +186,9 @@ public final class QuicConnection: QuicObject {
         super.init(handle: handle)
         retainSelfForCallback()
         
-        self.peerStreamHandler = streamHandler
+        internalState.withLock {
+            $0.peerStreamHandler = streamHandler
+        }
         
         typealias ConnectionCallback = @convention(c) (HQUIC?, UnsafeMutableRawPointer?, UnsafeMutablePointer<QUIC_CONNECTION_EVENT>?) -> QuicStatusRawValue
         let callback = quicConnectionCallback as ConnectionCallback
@@ -360,7 +362,9 @@ public final class QuicConnection: QuicObject {
     ///
     /// - Parameter handler: A closure that processes the new stream asynchronously.
     public func onPeerStreamStarted(_ handler: @escaping StreamHandler) {
-        self.peerStreamHandler = handler
+        internalState.withLock {
+            $0.peerStreamHandler = handler
+        }
     }
 
     /// Sets a handler for connection events.
@@ -370,7 +374,9 @@ public final class QuicConnection: QuicObject {
     ///
     /// - Parameter handler: A closure that processes connection events.
     public func onEvent(_ handler: @escaping EventHandler) {
-        self.eventHandler = handler
+        internalState.withLock {
+            $0.eventHandler = handler
+        }
     }
 
     /// Sets a handler for validating the peer's certificate.
@@ -414,12 +420,15 @@ public final class QuicConnection: QuicObject {
     ///
     /// - Parameter handler: A closure that validates the certificate and returns a status.
     public func onPeerCertificateReceived(_ handler: @escaping CertificateValidationHandler) {
-        self.certificateValidationHandler = handler
+        internalState.withLock {
+            $0.certificateValidationHandler = handler
+        }
     }
     
     internal func handleEvent(_ event: QUIC_CONNECTION_EVENT) -> QuicStatus {
         let swiftEvent = QuicEventConverter.convert(event)
         
+        let eventHandler = internalState.withLock { $0.eventHandler }
         if let handler = eventHandler {
             let status = handler(self, swiftEvent)
             if status != .success {
@@ -475,7 +484,8 @@ public final class QuicConnection: QuicObject {
             }
             
         case .peerStreamStarted(let streamHandle, _):
-            if let handler = peerStreamHandler {
+            let handler = internalState.withLock { $0.peerStreamHandler }
+            if let handler {
                 let stream = QuicStream(handle: streamHandle)
                 Task {
                     await handler(self, stream)
@@ -483,7 +493,8 @@ public final class QuicConnection: QuicObject {
             }
 
         case .peerCertificateReceived(let certificate, let chain, let errorFlags, let status):
-            if let handler = certificateValidationHandler {
+            let handler = internalState.withLock { $0.certificateValidationHandler }
+            if let handler {
                 return handler(self, certificate, chain, errorFlags, status)
             }
             return .success
