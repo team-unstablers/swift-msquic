@@ -114,7 +114,12 @@ internal enum QuicEventConverter {
             
         case QUIC_CONNECTION_EVENT_PEER_CERTIFICATE_RECEIVED:
             let cert = event.PEER_CERTIFICATE_RECEIVED
-            return .peerCertificateReceived(certificate: cert.Certificate, chain: cert.Chain)
+            return .peerCertificateReceived(
+                certificate: cert.Certificate,
+                chain: cert.Chain,
+                deferredErrorFlags: QuicCertificateValidationFlags(rawValue: cert.DeferredErrorFlags),
+                deferredStatus: QuicStatus(cert.DeferredStatus)
+            )
             
         default:
             return .unknown

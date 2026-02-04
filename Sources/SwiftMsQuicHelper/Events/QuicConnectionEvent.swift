@@ -114,7 +114,25 @@ public enum QuicConnectionEvent {
     case resumptionTicketReceived(ticket: Data)
 
     /// The peer's certificate was received.
-    case peerCertificateReceived(certificate: UnsafeMutableRawPointer?, chain: UnsafeMutableRawPointer?)
+    ///
+    /// This event is delivered when ``QuicCredentialFlags/indicateCertificateReceived`` is set.
+    /// When ``QuicCredentialFlags/deferCertificateValidation`` is also set, the application
+    /// can perform custom certificate validation and return the appropriate status.
+    ///
+    /// - Parameters:
+    ///   - certificate: Platform-specific peer certificate handle. Valid only during the callback.
+    ///   - chain: Platform-specific certificate chain handle. Valid only during the callback.
+    ///   - deferredErrorFlags: Bit flags indicating validation errors (Schannel/Windows only, zero on macOS/iOS).
+    ///   - deferredStatus: The validation error status. Check this on macOS/iOS instead of error flags.
+    ///
+    /// - Important: The `certificate` and `chain` pointers are only valid during the event callback.
+    ///   If you need to retain the certificate data, copy it before the callback returns.
+    case peerCertificateReceived(
+        certificate: UnsafeMutableRawPointer?,
+        chain: UnsafeMutableRawPointer?,
+        deferredErrorFlags: QuicCertificateValidationFlags,
+        deferredStatus: QuicStatus
+    )
 
     /// An unknown event type was received.
     case unknown

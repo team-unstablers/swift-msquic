@@ -115,6 +115,32 @@ public final class QuicConnection: QuicObject {
     public typealias EventHandler = (QuicConnection, QuicConnectionEvent) -> QuicStatus
     private var eventHandler: EventHandler?
 
+    /// A handler for validating the peer's certificate.
+    ///
+    /// This handler is called when the peer's certificate is received and
+    /// ``QuicCredentialFlags/indicateCertificateReceived`` is set.
+    ///
+    /// When ``QuicCredentialFlags/deferCertificateValidation`` is also set,
+    /// the return value determines whether the connection should proceed:
+    /// - Return ``QuicStatus/success`` to accept the certificate and continue the handshake.
+    /// - Return a failure status (e.g., ``QuicStatus/badCertificate``) to reject the certificate.
+    ///
+    /// - Parameters:
+    ///   - connection: The connection that received the certificate.
+    ///   - certificate: Platform-specific peer certificate handle.
+    ///   - chain: Platform-specific certificate chain handle.
+    ///   - deferredErrorFlags: Bit flags indicating validation errors (Schannel only).
+    ///   - deferredStatus: The validation error status from the TLS layer.
+    /// - Returns: A status indicating whether to accept or reject the certificate.
+    public typealias CertificateValidationHandler = (
+        _ connection: QuicConnection,
+        _ certificate: UnsafeMutableRawPointer?,
+        _ chain: UnsafeMutableRawPointer?,
+        _ deferredErrorFlags: QuicCertificateValidationFlags,
+        _ deferredStatus: QuicStatus
+    ) -> QuicStatus
+    private var certificateValidationHandler: CertificateValidationHandler?
+
     /// Creates a new client-side connection.
     ///
     /// Use this initializer when creating a connection to connect to a remote server.
@@ -289,6 +315,50 @@ public final class QuicConnection: QuicObject {
     public func onEvent(_ handler: @escaping EventHandler) {
         self.eventHandler = handler
     }
+
+    /// Sets a handler for validating the peer's certificate.
+    ///
+    /// This handler is invoked when the peer's certificate is received during the TLS handshake.
+    /// To receive this event, you must set ``QuicCredentialFlags/indicateCertificateReceived``
+    /// when loading credentials.
+    ///
+    /// ## Basic Usage (Certificate Inspection)
+    ///
+    /// ```swift
+    /// connection.onPeerCertificateReceived { conn, cert, chain, errorFlags, status in
+    ///     // Log certificate information
+    ///     print("Received peer certificate")
+    ///     return .success  // Accept the certificate
+    /// }
+    /// ```
+    ///
+    /// ## Custom Validation (with deferCertificateValidation)
+    ///
+    /// When ``QuicCredentialFlags/deferCertificateValidation`` is set, you can perform
+    /// custom validation and decide whether to accept or reject the certificate:
+    ///
+    /// ```swift
+    /// // When loading credentials:
+    /// try config.loadCredential(.init(
+    ///     type: .none,
+    ///     flags: [.client, .indicateCertificateReceived, .deferCertificateValidation]
+    /// ))
+    ///
+    /// // Handle certificate validation:
+    /// connection.onPeerCertificateReceived { conn, cert, chain, errorFlags, status in
+    ///     // Perform custom validation (e.g., certificate pinning)
+    ///     if isValidPinnedCertificate(cert) {
+    ///         return .success
+    ///     } else {
+    ///         return .badCertificate
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// - Parameter handler: A closure that validates the certificate and returns a status.
+    public func onPeerCertificateReceived(_ handler: @escaping CertificateValidationHandler) {
+        self.certificateValidationHandler = handler
+    }
     
     internal func handleEvent(_ event: QUIC_CONNECTION_EVENT) -> QuicStatus {
         let swiftEvent = QuicEventConverter.convert(event)
@@ -351,11 +421,17 @@ public final class QuicConnection: QuicObject {
                     await handler(self, stream)
                 }
             }
-            
+
+        case .peerCertificateReceived(let certificate, let chain, let errorFlags, let status):
+            if let handler = certificateValidationHandler {
+                return handler(self, certificate, chain, errorFlags, status)
+            }
+            return .success
+
         default:
             break
         }
-        
+
         return .success
     }
     
