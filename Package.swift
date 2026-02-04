@@ -17,7 +17,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "MsQuic",
-            path: "./dist/MsQuic.xcframework"
+            url: "https://github.com/team-unstablers/msquic/releases/download/v2.5.6-tuvariant%2Binmemory-pem/MsQuic-2.5.6-tuvariant+inmemory-pem-darwin-multiarch-static-unsigned.zip",
+            checksum: "a4cf76fd11849eb7013f0052682ed294c92304943712a2ca4325fe79164e708e",
         ),
         .target(
             name: "SwiftMsQuicOpenSSLUtils",
