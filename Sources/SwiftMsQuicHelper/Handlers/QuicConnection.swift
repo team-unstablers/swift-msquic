@@ -327,12 +327,12 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
                     return
                 }
 
-                var continuationToResume: CheckedContinuation<Void, Error>?
-                self.internalState.withLock { state in
-                    continuationToResume = state.shutdownThrowingContinuation
-                    if continuationToResume != nil {
+                let continuationToResume = self.internalState.withLock { state -> CheckedContinuation<Void, Error>? in
+                    let continuation = state.shutdownThrowingContinuation
+                    if continuation != nil {
                         state.shutdownThrowingContinuation = nil
                     }
+                    return continuation
                 }
 
                 guard let continuationToResume else { return }
