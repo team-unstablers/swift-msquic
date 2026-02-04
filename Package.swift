@@ -20,9 +20,21 @@ let package = Package(
             path: "./dist/MsQuic.xcframework"
         ),
         .target(
-            name: "SwiftMsQuicHelper",
+            name: "SwiftMsQuicOpenSSLUtils",
             dependencies: [
                 .target(name: "MsQuic")
+            ],
+            path: "Sources/SwiftMsQuicOpenSSLUtils",
+            publicHeadersPath: "Headers",
+            cSettings: [
+                .headerSearchPath("."),
+            ],
+        ),
+        .target(
+            name: "SwiftMsQuicHelper",
+            dependencies: [
+                .target(name: "MsQuic"),
+                .target(name: "SwiftMsQuicOpenSSLUtils"),
             ],
             path: "Sources/SwiftMsQuicHelper",
             swiftSettings: []
