@@ -86,7 +86,6 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         var connectionState: State = .idle
         var connectContinuation: CheckedContinuation<Void, Error>?
         var shutdownContinuation: CheckedContinuation<Void, Never>?
-        var shutdownThrowingContinuation: CheckedContinuation<Void, Error>?
         var peerStreamHandler: StreamHandler?
         var eventHandler: EventHandler?
         var certificateValidationHandler: CertificateValidationHandler?
@@ -407,20 +406,17 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
             continuation?.resume(throwing: QuicError.aborted)
             
         case .shutdownComplete:
-            let (shutdownContinuation, shutdownThrowingContinuation, connectContinuation) = internalState.withLock { state -> (CheckedContinuation<Void, Never>?, CheckedContinuation<Void, Error>?, CheckedContinuation<Void, Error>?) in
+            let (shutdownContinuation, connectContinuation) = internalState.withLock { state -> (CheckedContinuation<Void, Never>?, CheckedContinuation<Void, Error>?) in
                 state.connectionState = .closed
                 let sc = state.shutdownContinuation
                 state.shutdownContinuation = nil
-                let stc = state.shutdownThrowingContinuation
-                state.shutdownThrowingContinuation = nil
 
                 let cc = state.connectContinuation
                 state.connectContinuation = nil
 
-                return (sc, stc, cc)
+                return (sc, cc)
             }
             shutdownContinuation?.resume()
-            shutdownThrowingContinuation?.resume()
             connectContinuation?.resume(throwing: QuicError.aborted)
             
             Task {

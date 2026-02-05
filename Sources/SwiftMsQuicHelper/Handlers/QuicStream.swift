@@ -254,25 +254,54 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
         }
     }
     
-    /// Aborts the stream in both directions.
+    /// Shuts down the stream with the given flags.
     ///
-    /// This immediately terminates the stream, aborting any pending sends and receives.
+    /// Use `.graceful` to finish sending, or `.abort` to abort both directions immediately.
     ///
-    /// - Parameter errorCode: An optional application-defined error code to send to the peer.
+    /// - Parameters:
+    ///   - flags: Shutdown behavior flags. Default is `.abort`.
+    ///   - errorCode: An optional application-defined error code to send to the peer.
     public func shutdown(flags: QuicStreamShutdownFlags = .abort, errorCode: UInt64 = 0) async {
         guard let handle = handle else { return }
 
         await withCheckedContinuation { continuation in
-            internalState.withLock {
-                $0.shutdownContinuation = continuation
-                $0.streamState = .shuttingDown
+            var previousState: State? = nil
+            let shouldCall = internalState.withLock { state -> Bool in
+                switch state.streamState {
+                case .closed, .shuttingDown:
+                    return false
+                default:
+                    previousState = state.streamState
+                    state.shutdownContinuation = continuation
+                    state.streamState = .shuttingDown
+                    return true
+                }
             }
 
-            _ = api.StreamShutdown(
-                handle,
-                QUIC_STREAM_SHUTDOWN_FLAG_ABORT,
-                errorCode
+            guard shouldCall else {
+                continuation.resume()
+                return
+            }
+
+            let status = QuicStatus(
+                api.StreamShutdown(
+                    handle,
+                    QUIC_STREAM_SHUTDOWN_FLAGS(flags.rawValue),
+                    errorCode
+                )
             )
+
+            if status.failed {
+                let continuationToResume = internalState.withLock { state -> CheckedContinuation<Void, Never>? in
+                    let c = state.shutdownContinuation
+                    state.shutdownContinuation = nil
+                    if let previousState {
+                        state.streamState = previousState
+                    }
+                    return c
+                }
+                continuationToResume?.resume()
+            }
         }
     }
    
