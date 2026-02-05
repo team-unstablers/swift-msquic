@@ -178,10 +178,10 @@ public final class QuicListener: QuicObject, @unchecked Sendable {
                     return .success
                 }
                 // Rejected
-                api.ConnectionClose(info.connection)
+                // NOTE: Do NOT call ConnectionClose here when returning failure.
+                // MsQuic will close the connection on failure and double-free can occur otherwise.
                 return .connectionRefused
             } catch {
-                api.ConnectionClose(info.connection)
                 return .connectionRefused
             }
             
