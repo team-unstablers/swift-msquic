@@ -288,62 +288,6 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         }
     }
 
-    /// Gracefully shuts down the connection with a timeout.
-    ///
-    /// This method waits for the shutdown to complete up to the specified timeout.
-    /// If the timeout expires and `force` is `true`, the connection is force-closed.
-    ///
-    /// - Parameters:
-    ///   - errorCode: An optional application-defined error code to send to the peer.
-    ///   - timeoutMs: Maximum time to wait for shutdown completion, in milliseconds.
-    ///   - force: If `true`, force-close the connection when the timeout expires.
-    /// - Throws: ``QuicError/connectionTimeout`` if the timeout expires before shutdown completes.
-    public func shutdown(errorCode: UInt64 = 0, timeoutMs: UInt64, force: Bool = true) async throws {
-        guard let handle = handle else { return }
-
-        let shouldReturn = internalState.withLock { state -> Bool in
-            if state.connectionState == .closed { return true }
-            state.connectionState = .shuttingDown
-            return false
-        }
-        if shouldReturn { return }
-
-        try await withCheckedThrowingContinuation { continuation in
-            internalState.withLock {
-                $0.shutdownThrowingContinuation = continuation
-            }
-
-            api.ConnectionShutdown(
-                handle,
-                QUIC_CONNECTION_SHUTDOWN_FLAG_NONE,
-                errorCode
-            )
-
-            Task.detached(priority: .utility) { [weak self] in
-                guard let self else { return }
-                do {
-                    try await Task.sleep(nanoseconds: timeoutMs * 1_000_000)
-                } catch {
-                    return
-                }
-
-                let continuationToResume = self.internalState.withLock { state -> CheckedContinuation<Void, Error>? in
-                    let continuation = state.shutdownThrowingContinuation
-                    if continuation != nil {
-                        state.shutdownThrowingContinuation = nil
-                    }
-                    return continuation
-                }
-
-                guard let continuationToResume else { return }
-                continuationToResume.resume(throwing: QuicError.connectionTimeout)
-
-                guard force, let handle = self.handle else { return }
-                self.api.ConnectionClose(handle)
-            }
-        }
-    }
-    
     /// Opens a new stream on this connection.
     ///
     /// Creates a locally-initiated stream. After creation, call ``QuicStream/start(flags:)``

@@ -26,6 +26,14 @@ public enum QuicCredentialType {
     ///   - password: Optional password to decrypt the PKCS#12 data.
     case certificatePkcs12(blob: Data, password: String?)
 
+    /// Certificate and private key from PEM strings (in-memory).
+    ///
+    /// - Parameters:
+    ///   - key: The private key in PEM format (UTF-8 encoded).
+    ///   - cert: The certificate (and chain) in PEM format (UTF-8 encoded).
+    ///   - password: Optional password if the private key is encrypted (UTF-8 encoded).
+    case certificatePem(key: Data, cert: Data, password: Data?)
+
     /// No certificate.
     ///
     /// Use this for client connections or when certificates are not required.
@@ -163,6 +171,54 @@ public struct QuicCredentialConfig {
                     }
                 }
             }
+
+        case .certificatePem(let key, let cert, let password):
+            config.Type = QUIC_CREDENTIAL_TYPE_CERTIFICATE_PEM
+
+            // Use secure buffers that are zero-filled after use
+            return try withSecureBuffer(data: key) { keyPtr, keyLen in
+                return try withSecureBuffer(data: cert) { certPtr, certLen in
+                    // Password must be null-terminated for C API
+                    return try withSecureBuffer(data: password, appendNullTerminator: true) { pwdPtr, _ in
+                        var pem = QUIC_CERTIFICATE_PEM(
+                            PrivateKeyPem: keyPtr,
+                            PrivateKeyPemLength: UInt32(keyLen),
+                            PrivateKeyPassword: (password?.isEmpty ?? true) ? nil : UnsafeRawPointer(pwdPtr).assumingMemoryBound(to: CChar.self),
+                            CertificatePem: certPtr,
+                            CertificatePemLength: UInt32(certLen)
+                        )
+                        return try withUnsafeMutablePointer(to: &pem) { pemPtr in
+                            config.CertificatePem = pemPtr
+                            return try body(&config)
+                        }
+                    }
+                }
+            }
         }
+    }
+    
+    /// Copies data to a temporary buffer and zero-fills it upon exit.
+    private func withSecureBuffer<T>(data: Data?, appendNullTerminator: Bool = false, body: (UnsafePointer<UInt8>, Int) throws -> T) throws -> T {
+        guard let data = data, !data.isEmpty else {
+            // Provide a valid empty pointer if data is nil/empty
+            var empty: UInt8 = 0
+            return try body(&empty, 0)
+        }
+        
+        let count = data.count + (appendNullTerminator ? 1 : 0)
+        let pointer = UnsafeMutablePointer<UInt8>.allocate(capacity: count)
+        
+        data.copyBytes(to: pointer, count: data.count)
+        if appendNullTerminator {
+            pointer[data.count] = 0 // Null-terminate
+        }
+        
+        defer {
+            // WIPE: Zero-fill the memory before deallocating
+            pointer.initialize(repeating: 0, count: count)
+            pointer.deallocate()
+        }
+        
+        return try body(pointer, data.count)
     }
 }

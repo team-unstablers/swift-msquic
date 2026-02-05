@@ -95,3 +95,28 @@ public struct QuicSendFlags: OptionSet, Sendable {
     /// Delay sending until explicitly flushed.
     public static let delaySend = QuicSendFlags(rawValue: UInt32(QUIC_SEND_FLAG_DELAY_SEND.rawValue))
 }
+
+public struct QuicStreamShutdownFlags: OptionSet, Sendable {
+    public let rawValue: UInt32
+    public init(rawValue: UInt32) { self.rawValue = rawValue }
+
+    /// **Invalid** option.
+    public static let none = QuicStreamShutdownFlags([])
+    
+    public static let graceful = QuicStreamShutdownFlags(rawValue: UInt32(QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL.rawValue))
+
+    /// Indicates the app is gracefully shutting down the stream in the send direction.
+    public static let abortSend = QuicStreamShutdownFlags(rawValue: UInt32(QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND.rawValue))
+
+    /// Indicates the app is abortively shutting down the stream in the receive direction.
+    public static let abortReceive = QuicStreamShutdownFlags(rawValue: UInt32(QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE.rawValue))
+
+    public static let abort = QuicStreamShutdownFlags([.abortSend, .abortReceive])
+    
+    // Indicates the app does not want to wait for the acknowledgment of the shutdown before getting the `QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE` event. Only allowed for abortive shutdowns.
+    public static let immediate = QuicStreamShutdownFlags(rawValue: UInt32(QUIC_STREAM_SHUTDOWN_FLAG_IMMEDIATE.rawValue))
+    
+    // Indicates that the stream shutdown should be processed inmediately inline. This in only applicable for calls made within callbacks.
+    // WARNING: It can cause reentrant callbacks!
+    public static let inline = QuicStreamShutdownFlags(rawValue: UInt32(QUIC_STREAM_SHUTDOWN_FLAG_INLINE.rawValue))
+}
