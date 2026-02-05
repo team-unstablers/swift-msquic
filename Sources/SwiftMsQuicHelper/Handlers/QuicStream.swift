@@ -47,8 +47,6 @@ import os
 ///
 /// - ``start(flags:)``
 /// - ``shutdown(errorCode:)``
-/// - ``shutdownSend(errorCode:)``
-/// - ``shutdownReceive(errorCode:)``
 /// - ``state``
 ///
 /// ### Data Transfer
@@ -261,7 +259,7 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
     /// This immediately terminates the stream, aborting any pending sends and receives.
     ///
     /// - Parameter errorCode: An optional application-defined error code to send to the peer.
-    public func shutdown(errorCode: UInt64 = 0) async {
+    public func shutdown(flags: QuicStreamShutdownFlags = .abort, errorCode: UInt64 = 0) async {
         guard let handle = handle else { return }
 
         await withCheckedContinuation { continuation in
@@ -277,28 +275,7 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
             )
         }
     }
-
-    /// Gracefully shuts down the send direction of the stream.
-    ///
-    /// This signals to the peer that no more data will be sent (FIN).
-    /// Any pending sends will be completed before the shutdown takes effect.
-    ///
-    /// - Parameter errorCode: An optional application-defined error code.
-    public func shutdownSend(errorCode: UInt64 = 0) {
-        guard let handle = handle else { return }
-        _ = api.StreamShutdown(handle, QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, errorCode)
-    }
-
-    /// Aborts the receive direction of the stream.
-    ///
-    /// This signals to the peer that no more data will be accepted.
-    ///
-    /// - Parameter errorCode: An optional application-defined error code to send to the peer.
-    public func shutdownReceive(errorCode: UInt64 = 0) {
-        guard let handle = handle else { return }
-        _ = api.StreamShutdown(handle, QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE, errorCode)
-    }
-    
+   
     internal func handleEvent(_ event: QUIC_STREAM_EVENT) -> QuicStatus {
         let swiftEvent = QuicEventConverter.convert(event)
         
@@ -368,6 +345,8 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
         if let handle = handle {
             api.StreamClose(handle)
         }
+        
         internalState.withLock { $0.receiveContinuation }?.finish()
+        internalState.withLock { $0.shutdownContinuation }?.resume()
     }
 }
