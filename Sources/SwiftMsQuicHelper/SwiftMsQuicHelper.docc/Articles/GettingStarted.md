@@ -105,7 +105,7 @@ listener.onNewConnection { listener, info in
     let connection = try QuicConnection(
         handle: info.connection,
         configuration: configuration
-    ) { conn, stream in
+    ) { conn, stream, flags in
         // Handle incoming streams
         for try await data in stream.receive {
             print("Received: \(String(data: data, encoding: .utf8) ?? "?")")

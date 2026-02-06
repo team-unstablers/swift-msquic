@@ -107,7 +107,7 @@ func runServer() async throws {
     
     // Handle new connections
     listener.onNewConnection { listener, info in
-        let connection = try QuicConnection(handle: info.connection, configuration: config) { conn, stream in
+        let connection = try QuicConnection(handle: info.connection, configuration: config) { conn, stream, flags in
             // Handle new streams
             Task {
                 for try await data in stream.receive {

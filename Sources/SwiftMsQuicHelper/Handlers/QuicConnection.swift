@@ -36,7 +36,7 @@ import os
 ///     let connection = try QuicConnection(
 ///         handle: info.connection,
 ///         configuration: configuration
-///     ) { conn, stream in
+///     ) { conn, stream, flags in
 ///         // Handle incoming streams
 ///     }
 ///     return connection
@@ -106,7 +106,8 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
     /// - Parameters:
     ///   - connection: The connection that received the stream.
     ///   - stream: The new stream initiated by the peer.
-    public typealias StreamHandler = @Sendable (QuicConnection, QuicStream) async -> Void
+    ///   - flags: Open flags describing the peer stream direction/properties.
+    public typealias StreamHandler = @Sendable (QuicConnection, QuicStream, QuicStreamOpenFlags) async -> Void
 
     /// A handler for processing connection events.
     ///
@@ -178,7 +179,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
     /// - Parameters:
     ///   - handle: The raw MsQuic connection handle from ``QuicListenerEvent/NewConnectionInfo``.
     ///   - configuration: The configuration to apply to this connection.
-    ///   - streamHandler: An optional handler for streams initiated by the peer.
+    ///   - streamHandler: An optional handler for streams initiated by the peer, including open flags.
     /// - Throws: ``QuicError/invalidState`` if the configuration handle is invalid.
     public init(handle: HQUIC, configuration: QuicConfiguration, streamHandler: StreamHandler? = nil) throws {
         self.registration = configuration.registration
@@ -303,7 +304,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
     ///
     /// This handler is called whenever the remote peer opens a new stream on this connection.
     ///
-    /// - Parameter handler: A closure that processes the new stream asynchronously.
+    /// - Parameter handler: A closure that processes the new stream and its open flags asynchronously.
     public func onPeerStreamStarted(_ handler: @escaping StreamHandler) {
         internalState.withLock {
             $0.peerStreamHandler = handler
@@ -423,12 +424,12 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
                 self.releaseSelfFromCallback()
             }
             
-        case .peerStreamStarted(let streamHandle, _):
+        case .peerStreamStarted(let streamHandle, let flags):
             let handler = internalState.withLock { $0.peerStreamHandler }
             if let handler {
                 let stream = QuicStream(handle: streamHandle)
                 Task {
-                    await handler(self, stream)
+                    await handler(self, stream, flags)
                 }
             }
 

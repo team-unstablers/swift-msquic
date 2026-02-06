@@ -25,7 +25,7 @@ import os
 ///     let connection = try QuicConnection(
 ///         handle: info.connection,
 ///         configuration: configuration
-///     ) { conn, stream in
+///     ) { conn, stream, flags in
 ///         // Handle incoming streams
 ///     }
 ///

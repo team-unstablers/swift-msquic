@@ -4,6 +4,8 @@
 
 이 레포지토리는 MsQuic 라이브러리를 Swift에서 쉽게 쓸 수 있도록 prebuilt된 바이너리와 헬퍼 코드를 제공합니다.
 
+- 2026-02-06 기준: `QuicConnection.StreamHandler` 시그니처는 `(QuicConnection, QuicStream, QuicStreamOpenFlags) async -> Void`입니다. `onPeerStreamStarted(_:)`와 `init(handle:configuration:streamHandler:)`도 동일한 3-인자 핸들러를 사용합니다.
+
 </section>
 <section id="design-principles">
 

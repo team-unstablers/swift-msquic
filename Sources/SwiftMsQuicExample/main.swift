@@ -104,8 +104,9 @@ struct App {
         listener.onNewConnection { listener, info in
             print("[Server] New connection from \(info.remoteAddress)")
             
-            let connection = try QuicConnection(handle: info.connection, configuration: config) { conn, stream in
-                print("[Server] Stream started")
+            let connection = try QuicConnection(handle: info.connection, configuration: config) { conn, stream, flags in
+                let direction = flags.contains(.unidirectional) ? "unidirectional" : "bidirectional"
+                print("[Server] Stream started (\(direction))")
                 do {
                     for try await data in stream.receive {
                         let msg = String(data: data, encoding: .utf8) ?? "binary"
@@ -113,7 +114,7 @@ struct App {
                         try await stream.send(data) // Echo
                     }
                     print("[Server] Stream closed by peer")
-                    stream.shutdownSend()
+                    await stream.shutdown(flags: .graceful)
                 } catch {
                     print("[Server] Stream error: \(error)")
                 }
