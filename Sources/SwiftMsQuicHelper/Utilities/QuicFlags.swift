@@ -68,7 +68,7 @@ public struct QuicReceiveFlags: OptionSet, Sendable {
     public static let fin = QuicReceiveFlags(rawValue: UInt32(QUIC_RECEIVE_FLAG_FIN.rawValue))
 }
 
-/// Flags for sending data on a stream.
+/// Flags for sending data on a stream or as a connection-level datagram.
 ///
 /// These flags control the behavior of a send operation.
 public struct QuicSendFlags: OptionSet, Sendable {
@@ -94,6 +94,19 @@ public struct QuicSendFlags: OptionSet, Sendable {
 
     /// Delay sending until explicitly flushed.
     public static let delaySend = QuicSendFlags(rawValue: UInt32(QUIC_SEND_FLAG_DELAY_SEND.rawValue))
+
+    /// Cancel the stream on packet loss.
+    ///
+    /// This flag is stream-specific and ignored for datagram sends.
+    public static let cancelOnLoss = QuicSendFlags(rawValue: UInt32(QUIC_SEND_FLAG_CANCEL_ON_LOSS.rawValue))
+
+    /// Prioritize this send over other connection work.
+    public static let priorityWork = QuicSendFlags(rawValue: UInt32(QUIC_SEND_FLAG_PRIORITY_WORK.rawValue))
+
+    /// Allow MsQuic to drop frames that remain blocked in the queue.
+    ///
+    /// This flag is primarily useful for datagram sends.
+    public static let cancelOnBlocked = QuicSendFlags(rawValue: UInt32(QUIC_SEND_FLAG_CANCEL_ON_BLOCKED.rawValue))
 }
 
 public struct QuicStreamShutdownFlags: OptionSet, Sendable {

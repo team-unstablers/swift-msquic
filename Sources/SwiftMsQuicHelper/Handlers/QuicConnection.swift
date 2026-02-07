@@ -61,6 +61,10 @@ import os
 /// - ``openStream(flags:)``
 /// - ``onPeerStreamStarted(_:)``
 ///
+/// ### Working with Datagrams
+///
+/// - ``sendDatagram(_:flags:)``
+///
 /// ### Event Handling
 ///
 /// - ``onEvent(_:)``
@@ -89,6 +93,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         var peerStreamHandler: StreamHandler?
         var eventHandler: EventHandler?
         var certificateValidationHandler: CertificateValidationHandler?
+        var datagramSendContexts: Set<UInt> = []
     }
     
     private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
@@ -141,6 +146,30 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         _ deferredErrorFlags: QuicCertificateValidationFlags,
         _ deferredStatus: QuicStatus
     ) -> QuicStatus
+
+    private class DatagramSendContext {
+        let continuation: CheckedContinuation<Void, Error>
+        let buffer: UnsafeMutableRawBufferPointer
+        let quicBuffer: UnsafeMutablePointer<QUIC_BUFFER>
+
+        init(_ continuation: CheckedContinuation<Void, Error>, data: Data) {
+            self.continuation = continuation
+            self.buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: data.count, alignment: 1)
+            if data.count > 0 {
+                data.copyBytes(to: self.buffer)
+            }
+
+            self.quicBuffer = UnsafeMutablePointer<QUIC_BUFFER>.allocate(capacity: 1)
+            let bytePtr = data.count > 0 ? self.buffer.bindMemory(to: UInt8.self).baseAddress : nil
+            self.quicBuffer.initialize(to: QUIC_BUFFER(Length: UInt32(data.count), Buffer: bytePtr))
+        }
+
+        deinit {
+            quicBuffer.deinitialize(count: 1)
+            quicBuffer.deallocate()
+            buffer.deallocate()
+        }
+    }
 
     /// Creates a new client-side connection.
     ///
@@ -300,6 +329,50 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         return try QuicStream(connection: self, flags: flags)
     }
 
+    /// Sends a connection-level datagram.
+    ///
+    /// This method queues unreliable data on the connection (not on a stream).
+    /// Delivery to the peer is not guaranteed.
+    ///
+    /// - Parameters:
+    ///   - data: The datagram payload.
+    ///   - flags: Flags controlling datagram send behavior.
+    /// - Throws: ``QuicError`` if the send fails or the datagram is canceled before it is sent.
+    public func sendDatagram(_ data: Data, flags: QuicSendFlags = .none) async throws {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let context = DatagramSendContext(continuation, data: data)
+            let contextPtr = Unmanaged.passRetained(context).toOpaque()
+
+            let contextToken = UInt(bitPattern: contextPtr)
+            _ = internalState.withLock { $0.datagramSendContexts.insert(contextToken) }
+
+            let status = QuicStatus(
+                api.DatagramSend(
+                    handle,
+                    context.quicBuffer,
+                    1,
+                    QUIC_SEND_FLAGS(flags.rawValue),
+                    contextPtr
+                )
+            )
+
+            if status.failed {
+                let sendContext: DatagramSendContext? = internalState.withLock { state in
+                    guard state.datagramSendContexts.remove(contextToken) != nil else {
+                        return nil
+                    }
+                    guard let rawPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
+                        return nil
+                    }
+                    return Unmanaged<DatagramSendContext>.fromOpaque(rawPtr).takeRetainedValue()
+                }
+                sendContext?.continuation.resume(throwing: QuicError(status: status))
+            }
+        }
+    }
+
     /// Sets a handler for streams initiated by the peer.
     ///
     /// This handler is called whenever the remote peer opens a new stream on this connection.
@@ -407,7 +480,12 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
             continuation?.resume(throwing: QuicError.aborted)
             
         case .shutdownComplete:
-            let (shutdownContinuation, connectContinuation) = internalState.withLock { state -> (CheckedContinuation<Void, Never>?, CheckedContinuation<Void, Error>?) in
+            let (shutdownContinuation, connectContinuation, datagramSendContexts) = internalState.withLock {
+                state -> (
+                    CheckedContinuation<Void, Never>?,
+                    CheckedContinuation<Void, Error>?,
+                    [UInt]
+                ) in
                 state.connectionState = .closed
                 let sc = state.shutdownContinuation
                 state.shutdownContinuation = nil
@@ -415,13 +493,58 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
                 let cc = state.connectContinuation
                 state.connectContinuation = nil
 
-                return (sc, cc)
+                let contexts = Array(state.datagramSendContexts)
+                state.datagramSendContexts.removeAll()
+
+                return (sc, cc, contexts)
+            }
+            for contextToken in datagramSendContexts {
+                guard let contextPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
+                    continue
+                }
+                let sendContext = Unmanaged<DatagramSendContext>.fromOpaque(contextPtr).takeRetainedValue()
+                sendContext.continuation.resume(throwing: QuicError.aborted)
             }
             shutdownContinuation?.resume()
             connectContinuation?.resume(throwing: QuicError.aborted)
             
             Task {
                 self.releaseSelfFromCallback()
+            }
+
+        case .datagramSendStateChanged(let state, let context):
+            guard let context else {
+                break
+            }
+            let contextToken = UInt(bitPattern: context)
+
+            switch state {
+            case .sent, .lostDiscarded, .acknowledged, .acknowledgedSpurious:
+                let sendContext: DatagramSendContext? = internalState.withLock { state in
+                    guard state.datagramSendContexts.remove(contextToken) != nil else {
+                        return nil
+                    }
+                    guard let rawPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
+                        return nil
+                    }
+                    return Unmanaged<DatagramSendContext>.fromOpaque(rawPtr).takeRetainedValue()
+                }
+                sendContext?.continuation.resume()
+
+            case .canceled, .unknown:
+                let sendContext: DatagramSendContext? = internalState.withLock { state in
+                    guard state.datagramSendContexts.remove(contextToken) != nil else {
+                        return nil
+                    }
+                    guard let rawPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
+                        return nil
+                    }
+                    return Unmanaged<DatagramSendContext>.fromOpaque(rawPtr).takeRetainedValue()
+                }
+                sendContext?.continuation.resume(throwing: QuicError.aborted)
+
+            case .lostSuspect:
+                break
             }
             
         case .peerStreamStarted(let streamHandle, let flags):
@@ -448,6 +571,19 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
     }
     
     deinit {
+        let datagramSendContexts = internalState.withLock { state -> [UInt] in
+            let contexts = Array(state.datagramSendContexts)
+            state.datagramSendContexts.removeAll()
+            return contexts
+        }
+        for contextToken in datagramSendContexts {
+            guard let contextPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
+                continue
+            }
+            let sendContext = Unmanaged<DatagramSendContext>.fromOpaque(contextPtr).takeRetainedValue()
+            sendContext.continuation.resume(throwing: QuicError.aborted)
+        }
+
         if let handle = handle {
             api.ConnectionClose(handle)
         }
