@@ -53,6 +53,8 @@ import os
 ///
 /// - ``send(_:flags:)``
 /// - ``receive``
+/// - ``setPriority(_:)``
+/// - ``getPriority()``
 public final class QuicStream: QuicObject, @unchecked Sendable {
 
     /// The current state of the stream.
@@ -252,6 +254,54 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
                 continuation.resume(throwing: QuicError(status: status))
             }
         }
+    }
+
+    /// Sets the stream priority for send scheduling.
+    ///
+    /// Higher values are sent before lower values. Valid range is `0...0xFFFF`.
+    ///
+    /// - Parameter priority: The new stream priority.
+    /// - Throws: ``QuicError`` if the stream is invalid or MsQuic rejects the parameter.
+    public func setPriority(_ priority: UInt16) throws {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        var rawPriority = priority
+        let status = QuicStatus(
+            api.SetParam(
+                handle,
+                UInt32(QUIC_PARAM_STREAM_PRIORITY),
+                UInt32(MemoryLayout.size(ofValue: rawPriority)),
+                &rawPriority
+            )
+        )
+        try status.throwIfFailed()
+    }
+
+    /// Gets the current stream priority used for send scheduling.
+    ///
+    /// - Returns: The current priority value (`0...0xFFFF`).
+    /// - Throws: ``QuicError`` if the stream is invalid or MsQuic fails.
+    public func getPriority() throws -> UInt16 {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        var rawPriority: UInt16 = 0
+        var bufferLength = UInt32(MemoryLayout.size(ofValue: rawPriority))
+
+        let status = QuicStatus(
+            api.GetParam(
+                handle,
+                UInt32(QUIC_PARAM_STREAM_PRIORITY),
+                &bufferLength,
+                &rawPriority
+            )
+        )
+        try status.throwIfFailed()
+
+        guard bufferLength == UInt32(MemoryLayout.size(ofValue: rawPriority)) else {
+            throw QuicError.invalidState
+        }
+
+        return rawPriority
     }
     
     /// Shuts down the stream with the given flags.

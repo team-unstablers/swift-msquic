@@ -60,6 +60,8 @@ import os
 ///
 /// - ``openStream(flags:)``
 /// - ``onPeerStreamStarted(_:)``
+/// - ``setStreamSchedulingScheme(_:)``
+/// - ``getStreamSchedulingScheme()``
 ///
 /// ### Working with Datagrams
 ///
@@ -84,6 +86,15 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         case shuttingDown
         /// Connection has been closed.
         case closed
+    }
+
+    /// Stream scheduling behavior used by MsQuic for this connection.
+    public enum StreamSchedulingScheme: UInt32, Sendable {
+        /// Sends stream data in first-in, first-out order (default).
+        case fifo = 0
+
+        /// Sends stream data evenly across streams of the same priority.
+        case roundRobin = 1
     }
     
     private struct InternalState: @unchecked Sendable {
@@ -371,6 +382,55 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
                 sendContext?.continuation.resume(throwing: QuicError(status: status))
             }
         }
+    }
+
+    /// Sets the stream scheduling scheme for this connection.
+    ///
+    /// - Parameter scheme: The scheduling behavior to apply.
+    /// - Throws: ``QuicError`` if the connection is invalid or MsQuic rejects the parameter.
+    public func setStreamSchedulingScheme(_ scheme: StreamSchedulingScheme) throws {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        var rawScheme = scheme.rawValue
+        let status = QuicStatus(
+            api.SetParam(
+                handle,
+                UInt32(QUIC_PARAM_CONN_STREAM_SCHEDULING_SCHEME),
+                UInt32(MemoryLayout.size(ofValue: rawScheme)),
+                &rawScheme
+            )
+        )
+        try status.throwIfFailed()
+    }
+
+    /// Gets the current stream scheduling scheme for this connection.
+    ///
+    /// - Returns: The current scheduling behavior.
+    /// - Throws: ``QuicError`` if the connection is invalid, MsQuic fails, or an unexpected value is returned.
+    public func getStreamSchedulingScheme() throws -> StreamSchedulingScheme {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        var rawScheme: UInt32 = 0
+        var bufferLength = UInt32(MemoryLayout.size(ofValue: rawScheme))
+
+        let status = QuicStatus(
+            api.GetParam(
+                handle,
+                UInt32(QUIC_PARAM_CONN_STREAM_SCHEDULING_SCHEME),
+                &bufferLength,
+                &rawScheme
+            )
+        )
+        try status.throwIfFailed()
+
+        guard
+            bufferLength == UInt32(MemoryLayout.size(ofValue: rawScheme)),
+            let scheme = StreamSchedulingScheme(rawValue: rawScheme)
+        else {
+            throw QuicError.invalidState
+        }
+
+        return scheme
     }
 
     /// Sets a handler for streams initiated by the peer.
