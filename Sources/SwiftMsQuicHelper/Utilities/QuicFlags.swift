@@ -109,6 +109,20 @@ public struct QuicSendFlags: OptionSet, Sendable {
     public static let cancelOnBlocked = QuicSendFlags(rawValue: UInt32(QUIC_SEND_FLAG_CANCEL_ON_BLOCKED.rawValue))
 }
 
+/// Flags for sending connection resumption tickets.
+///
+/// These flags control server-side ticket issuance behavior.
+public struct QuicSendResumptionFlags: OptionSet, Sendable {
+    public let rawValue: UInt32
+    public init(rawValue: UInt32) { self.rawValue = rawValue }
+
+    /// No special flags.
+    public static let none = QuicSendResumptionFlags([])
+
+    /// Marks this as the final ticket and allows MsQuic to free TLS resumption state.
+    public static let final = QuicSendResumptionFlags(rawValue: UInt32(QUIC_SEND_RESUMPTION_FLAG_FINAL.rawValue))
+}
+
 public struct QuicStreamShutdownFlags: OptionSet, Sendable {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }

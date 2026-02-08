@@ -58,6 +58,11 @@ import os
 /// - ``setLocalAddress(_:)``
 /// - ``getLocalAddress()``
 ///
+/// ### Session Resumption
+///
+/// - ``setResumptionTicket(_:)``
+/// - ``sendResumptionTicket(flags:resumptionData:)``
+///
 /// ### Working with Streams
 ///
 /// - ``openStream(flags:)``
@@ -384,6 +389,74 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
                 sendContext?.continuation.resume(throwing: QuicError(status: status))
             }
         }
+    }
+
+    /// Sets a client-side resumption ticket to attempt session resumption on the next connect.
+    ///
+    /// Use this before ``start(configuration:serverName:serverPort:)`` with a ticket previously
+    /// received via ``QuicConnectionEvent/resumptionTicketReceived(ticket:)``.
+    ///
+    /// - Parameter ticket: The raw ticket bytes persisted by the client.
+    /// - Throws: ``QuicError`` if the connection is invalid or MsQuic rejects the ticket.
+    public func setResumptionTicket(_ ticket: Data) throws {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        guard ticket.count <= Int(UInt32.max) else {
+            throw QuicError.invalidParameter
+        }
+
+        let status = ticket.withUnsafeBytes { rawBuffer -> QuicStatus in
+            let ticketBytes = rawBuffer.bindMemory(to: UInt8.self).baseAddress
+            return QuicStatus(
+                api.SetParam(
+                    handle,
+                    UInt32(QUIC_PARAM_CONN_RESUMPTION_TICKET),
+                    UInt32(ticket.count),
+                    UnsafeMutableRawPointer(mutating: ticketBytes)
+                )
+            )
+        }
+        try status.throwIfFailed()
+    }
+
+    /// Sends a server-side resumption ticket to the connected client.
+    ///
+    /// Optionally include application-defined resumption data (up to
+    /// `QUIC_MAX_RESUMPTION_APP_DATA_LENGTH` bytes), which is surfaced to the server later
+    /// via ``QuicConnectionEvent/resumed(resumptionState:)``.
+    ///
+    /// - Parameters:
+    ///   - flags: Ticket send flags controlling ticket lifecycle behavior.
+    ///   - resumptionData: Optional app-specific data to embed in the ticket.
+    /// - Throws: ``QuicError`` if the connection is invalid, parameters are out of range, or MsQuic fails.
+    public func sendResumptionTicket(
+        flags: QuicSendResumptionFlags = .none,
+        resumptionData: Data? = nil
+    ) throws {
+        guard let handle = handle else {
+            throw QuicError.invalidState
+        }
+
+        let data = resumptionData ?? Data()
+        guard data.count <= Int(QUIC_MAX_RESUMPTION_APP_DATA_LENGTH) else {
+            throw QuicError.invalidParameter
+        }
+        guard data.count <= Int(UInt16.max) else {
+            throw QuicError.invalidParameter
+        }
+
+        let status = data.withUnsafeBytes { rawBuffer -> QuicStatus in
+            let ticketBytes = rawBuffer.bindMemory(to: UInt8.self).baseAddress
+            return QuicStatus(
+                api.ConnectionSendResumptionTicket(
+                    handle,
+                    QUIC_SEND_RESUMPTION_FLAGS(flags.rawValue),
+                    UInt16(data.count),
+                    ticketBytes
+                )
+            )
+        }
+        try status.throwIfFailed()
     }
 
     /// Sets the stream scheduling scheme for this connection.
