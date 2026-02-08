@@ -55,6 +55,8 @@ import os
 /// - ``start(configuration:serverName:serverPort:)``
 /// - ``shutdown(errorCode:)``
 /// - ``state``
+/// - ``setLocalAddress(_:)``
+/// - ``getLocalAddress()``
 ///
 /// ### Working with Streams
 ///
@@ -96,7 +98,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         /// Sends stream data evenly across streams of the same priority.
         case roundRobin = 1
     }
-    
+
     private struct InternalState: @unchecked Sendable {
         var connectionState: State = .idle
         var connectContinuation: CheckedContinuation<Void, Error>?
@@ -431,6 +433,56 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         }
 
         return scheme
+    }
+
+    /// Sets the local network address for this connection.
+    ///
+    /// This maps to `QUIC_PARAM_CONN_LOCAL_ADDRESS`.
+    ///
+    /// - Parameter address: The local address to bind.
+    /// - Throws: ``QuicError`` if the connection is invalid or MsQuic rejects the parameter.
+    public func setLocalAddress(_ address: QuicAddress) throws {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        var rawAddress = address.raw
+        let status = QuicStatus(
+            api.SetParam(
+                handle,
+                UInt32(QUIC_PARAM_CONN_LOCAL_ADDRESS),
+                UInt32(MemoryLayout.size(ofValue: rawAddress)),
+                &rawAddress
+            )
+        )
+        try status.throwIfFailed()
+    }
+
+    /// Gets the current local network address for this connection.
+    ///
+    /// This maps to `QUIC_PARAM_CONN_LOCAL_ADDRESS`.
+    ///
+    /// - Returns: The local address currently associated with the connection.
+    /// - Throws: ``QuicError`` if the connection is invalid, MsQuic fails, or an unexpected value is returned.
+    public func getLocalAddress() throws -> QuicAddress {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        var rawAddress = QUIC_ADDR()
+        var bufferLength = UInt32(MemoryLayout.size(ofValue: rawAddress))
+
+        let status = QuicStatus(
+            api.GetParam(
+                handle,
+                UInt32(QUIC_PARAM_CONN_LOCAL_ADDRESS),
+                &bufferLength,
+                &rawAddress
+            )
+        )
+        try status.throwIfFailed()
+
+        guard bufferLength == UInt32(MemoryLayout.size(ofValue: rawAddress)) else {
+            throw QuicError.invalidState
+        }
+
+        return QuicAddress(rawAddress)
     }
 
     /// Sets a handler for streams initiated by the peer.
