@@ -10,6 +10,7 @@ This library simplifies the usage of the QUIC protocol in Swift applications on 
 - **Memory Safety**: Class-based wrappers handle MsQuic handle lifetimes automatically using ARC (Automatic Reference Counting).
 - **Prebuilt Binaries**: Includes `MsQuic.xcframework` (`v2.5.6-tuvariant`), so you don't need to build MsQuic from source.
 - **iOS Compatible**: Modified to comply with iOS App Store guidelines (removed `dlopen` calls).
+- **Stream Scheduling Controls**: Supports connection-level stream scheduling (`fifo` / `roundRobin`) and per-stream priority.
 
 ## Requirements
 
@@ -70,10 +71,14 @@ func runClient() async throws {
     // 2. Connect
     let connection = try QuicConnection(registration: reg)
     try await connection.start(configuration: config, serverName: "localhost", serverPort: 4567)
+
+    // Optional: use round-robin scheduling across streams of the same priority
+    try connection.setStreamSchedulingScheme(.roundRobin)
     
     // 3. Open Stream & Send Data
     let stream = try connection.openStream(flags: .none)
     try await stream.start()
+    try stream.setPriority(0x9000) // 0xFFFF is highest priority
     
     try await stream.send(Data("Hello".utf8), flags: .fin)
     
@@ -114,7 +119,7 @@ func runServer() async throws {
                     // Echo back
                     try await stream.send(data)
                 }
-                stream.shutdownSend()
+                await stream.shutdown(flags: .graceful)
             }
         }
         return connection
@@ -125,6 +130,26 @@ func runServer() async throws {
     // Keep the server running...
     try await Task.sleep(nanoseconds: 100_000_000_000_000)
 }
+```
+
+### 4. Stream Scheduling & Priority
+
+`QuicConnection` supports connection-level stream scheduling:
+
+```swift
+try connection.setStreamSchedulingScheme(.fifo)       // default
+try connection.setStreamSchedulingScheme(.roundRobin) // fairness for same-priority streams
+
+let scheme = try connection.getStreamSchedulingScheme()
+print("Current scheme: \(scheme)")
+```
+
+`QuicStream` supports per-stream send priority (`UInt16`, `0x0000...0xFFFF`):
+
+```swift
+try stream.setPriority(0xFFFF) // highest
+let priority = try stream.getPriority()
+print("Current stream priority: \(priority)")
 ```
 
 ## Important Notes

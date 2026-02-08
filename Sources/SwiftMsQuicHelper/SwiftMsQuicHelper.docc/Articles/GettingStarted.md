@@ -51,9 +51,13 @@ try await connection.start(
     serverPort: 4567
 )
 
+// Optional: use round-robin scheduling across streams of the same priority
+try connection.setStreamSchedulingScheme(.roundRobin)
+
 // Open a stream and send data
 let stream = try connection.openStream()
 try await stream.start()
+try stream.setPriority(0x9000) // 0xFFFF is highest priority
 
 let message = "Hello, QUIC!"
 try await stream.send(Data(message.utf8), flags: .fin)
@@ -123,6 +127,26 @@ try listener.start(
 )
 
 print("Server listening on port 4567")
+```
+
+## Stream Scheduling and Priority
+
+`QuicConnection` supports connection-level stream scheduling:
+
+```swift
+try connection.setStreamSchedulingScheme(.fifo)       // default
+try connection.setStreamSchedulingScheme(.roundRobin) // fairness for same-priority streams
+
+let scheme = try connection.getStreamSchedulingScheme()
+print("Current scheme: \(scheme)")
+```
+
+`QuicStream` supports per-stream send priority (`UInt16`, `0x0000...0xFFFF`):
+
+```swift
+try stream.setPriority(0xFFFF) // highest
+let priority = try stream.getPriority()
+print("Current stream priority: \(priority)")
 ```
 
 ## Next Steps
