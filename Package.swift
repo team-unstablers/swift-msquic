@@ -9,7 +9,7 @@ let package = Package(
         .iOS(.v16)
     ],
     products: [
-        .library(name: "SwiftMsQuic", targets: ["MsQuic", "SwiftMsQuicHelper"])
+        .library(name: "SwiftMsQuic", type: .dynamic, targets: ["MsQuic", "SwiftMsQuicHelper"])
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.3.0")
