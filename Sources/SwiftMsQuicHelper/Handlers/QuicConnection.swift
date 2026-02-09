@@ -57,6 +57,8 @@ import os
 /// - ``state``
 /// - ``setLocalAddress(_:)``
 /// - ``getLocalAddress()``
+/// - ``setRemoteAddress(_:)``
+/// - ``getRemoteAddress()``
 ///
 /// ### Session Resumption
 ///
@@ -545,6 +547,56 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
             api.GetParam(
                 handle,
                 UInt32(QUIC_PARAM_CONN_LOCAL_ADDRESS),
+                &bufferLength,
+                &rawAddress
+            )
+        )
+        try status.throwIfFailed()
+
+        guard bufferLength == UInt32(MemoryLayout.size(ofValue: rawAddress)) else {
+            throw QuicError.invalidState
+        }
+
+        return QuicAddress(rawAddress)
+    }
+
+    /// Sets the remote network address for this connection.
+    ///
+    /// This maps to `QUIC_PARAM_CONN_REMOTE_ADDRESS`.
+    ///
+    /// - Parameter address: The remote peer address to apply.
+    /// - Throws: ``QuicError`` if the connection is invalid or MsQuic rejects the parameter.
+    public func setRemoteAddress(_ address: QuicAddress) throws {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        var rawAddress = address.raw
+        let status = QuicStatus(
+            api.SetParam(
+                handle,
+                UInt32(QUIC_PARAM_CONN_REMOTE_ADDRESS),
+                UInt32(MemoryLayout.size(ofValue: rawAddress)),
+                &rawAddress
+            )
+        )
+        try status.throwIfFailed()
+    }
+
+    /// Gets the current remote network address for this connection.
+    ///
+    /// This maps to `QUIC_PARAM_CONN_REMOTE_ADDRESS`.
+    ///
+    /// - Returns: The remote address currently associated with the connection.
+    /// - Throws: ``QuicError`` if the connection is invalid, MsQuic fails, or an unexpected value is returned.
+    public func getRemoteAddress() throws -> QuicAddress {
+        guard let handle = handle else { throw QuicError.invalidState }
+
+        var rawAddress = QUIC_ADDR()
+        var bufferLength = UInt32(MemoryLayout.size(ofValue: rawAddress))
+
+        let status = QuicStatus(
+            api.GetParam(
+                handle,
+                UInt32(QUIC_PARAM_CONN_REMOTE_ADDRESS),
                 &bufferLength,
                 &rawAddress
             )
