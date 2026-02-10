@@ -24,4 +24,11 @@
 ///
 /// @return A CFArrayRef containing SecCertificateRef objects, or nil if an error occurred.
 + (CFArrayRef) copySecCertificateArrayFromOpenSSLStackX509: (const void *) stackX509 error: (NSError **) error;
+
+/// Constructs an array of SecCertificateRef from OpenSSL X509_STORE_CTX.
+/// @param storeContext Pointer to OpenSSL X509_STORE_CTX structure.
+/// @param error Pointer to NSError object to capture any error that occurs during the conversion.
+///
+/// @return A CFArrayRef containing SecCertificateRef objects, or nil if an error occurred.
++ (CFArrayRef) copySecCertificateArrayFromOpenSSLStoreContext: (const void *) storeContext error: (NSError **) error;
 @end

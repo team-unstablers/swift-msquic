@@ -10,6 +10,7 @@
 #import <Security/Security.h>
 
 #include "openssl/x509.h"
+#include "openssl/x509_vfy.h"
 #include "openssl/crypto.h"
 
 #import "CertBridge.h"
@@ -20,10 +21,13 @@ typedef NS_ENUM(NSInteger, CertBridgeErrorCode) {
     CertBridgeErrorCodeNullInput = -1,
     CertBridgeErrorCodeDEREncodingFailed = -2,
     CertBridgeErrorCodeSecCertificateCreationFailed = -3,
-    CertBridgeErrorCodeEmptyStack = -4,
 };
 
 @implementation CertBridge
+
+static CFArrayRef CopyEmptyCertificateArray(void) {
+    return CFArrayCreate(kCFAllocatorDefault, NULL, 0, &kCFTypeArrayCallBacks);
+}
 
 + (SecCertificateRef) copySecCertificateFromOpenSSLX509: (const void *) x509 error: (NSError **) error {
     if (x509 == NULL) {
@@ -84,24 +88,14 @@ typedef NS_ENUM(NSInteger, CertBridgeErrorCode) {
 
 + (CFArrayRef) copySecCertificateArrayFromOpenSSLStackX509: (const void *) stackX509 error: (NSError **) error {
     if (stackX509 == NULL) {
-        if (error != NULL) {
-            *error = [NSError errorWithDomain: kCertBridgeErrorDomain
-                                         code: CertBridgeErrorCodeNullInput
-                                     userInfo: @{ NSLocalizedDescriptionKey: @"STACK_OF(X509) pointer is NULL" }];
-        }
-        return nil;
+        return CopyEmptyCertificateArray();
     }
 
     STACK_OF(X509) *stack = (STACK_OF(X509) *)stackX509;
     int count = sk_X509_num(stack);
 
     if (count <= 0) {
-        if (error != NULL) {
-            *error = [NSError errorWithDomain: kCertBridgeErrorDomain
-                                         code: CertBridgeErrorCodeEmptyStack
-                                     userInfo: @{ NSLocalizedDescriptionKey: @"STACK_OF(X509) is empty" }];
-        }
-        return nil;
+        return CopyEmptyCertificateArray();
     }
 
     // Create mutable array with SecCertificateRef callbacks
@@ -141,5 +135,15 @@ typedef NS_ENUM(NSInteger, CertBridgeErrorCode) {
     return array;
 }
 
-@end
++ (CFArrayRef) copySecCertificateArrayFromOpenSSLStoreContext: (const void *) storeContext error: (NSError **) error {
+    if (storeContext == NULL) {
+        return CopyEmptyCertificateArray();
+    }
 
+    X509_STORE_CTX *context = (X509_STORE_CTX *)storeContext;
+    STACK_OF(X509) *stack = X509_STORE_CTX_get0_chain(context);
+
+    return [self copySecCertificateArrayFromOpenSSLStackX509: stack error: error];
+}
+
+@end

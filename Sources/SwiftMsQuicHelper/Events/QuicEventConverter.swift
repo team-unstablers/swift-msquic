@@ -121,23 +121,25 @@ internal enum QuicEventConverter {
             let cert = event.PEER_CERTIFICATE_RECEIVED
             
 #if canImport(Security)
-            // FIXME
-            
-            let certificate = try! CertBridge.copySecCertificate(fromOpenSSLX509: cert.Certificate).takeRetainedValue()
-            let cfCertChain = try! CertBridge.copySecCertificateArray(fromOpenSSLStackX509: cert.Certificate).takeRetainedValue()
-            
-            var chain: [QuicCertificate] = []
-            
-            if let casted = ((cfCertChain as NSArray) as? [QuicCertificate]) {
-                chain = casted
+            do {
+                let certificate = try CertBridge.copySecCertificate(fromOpenSSLX509: cert.Certificate).takeRetainedValue()
+                let cfCertChain = try CertBridge.copySecCertificateArray(fromOpenSSLStoreContext: cert.Chain).takeRetainedValue()
+
+                var chain: [QuicCertificate] = []
+                if let casted = ((cfCertChain as NSArray) as? [QuicCertificate]) {
+                    chain = casted
+                }
+
+                return .peerCertificateReceived(
+                    certificate: certificate,
+                    chain: chain,
+                    deferredErrorFlags: QuicCertificateValidationFlags(rawValue: cert.DeferredErrorFlags),
+                    deferredStatus: QuicStatus(cert.DeferredStatus)
+                )
+            } catch {
+                assertionFailure("Failed to convert peer certificate event: \(error)")
+                return .unknown
             }
-            
-            return .peerCertificateReceived(
-                certificate: certificate,
-                chain: chain,
-                deferredErrorFlags: QuicCertificateValidationFlags(rawValue: cert.DeferredErrorFlags),
-                deferredStatus: QuicStatus(cert.DeferredStatus)
-            )
 #else
             return .peerCertificateReceived(
                 certificate: cert.Certificate,
