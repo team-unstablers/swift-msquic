@@ -24,7 +24,7 @@ Add `swift-msquic` to your `Package.swift` dependencies:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/team-unstablers/swift-msquic.git", from: "1.0.5")
+    .package(url: "https://github.com/team-unstablers/swift-msquic.git", from: "1.1.0")
 ]
 ```
 
@@ -151,6 +151,18 @@ try stream.setPriority(0xFFFF) // highest
 let priority = try stream.getPriority()
 print("Current stream priority: \(priority)")
 ```
+
+## Debug Build
+
+This package ships both **Release** and **Debug** (with MsQuic internal logging enabled) prebuilt binaries. By default, the Release binary is used.
+
+To switch to the Debug binary, set the `MSQUIC_DEBUG` environment variable before building:
+
+```bash
+MSQUIC_DEBUG=1 swift build
+```
+
+> **Note**: This environment variable is evaluated at **package resolution time** (`Package.swift`), not at build time. Xcode resolves packages through its own process, so this method works reliably only with the Swift CLI (`swift build`, `swift test`, etc.).
 
 ## Important Notes
 
