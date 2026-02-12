@@ -24,7 +24,7 @@ Add `swift-msquic` to your `Package.swift` dependencies:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/team-unstablers/swift-msquic.git", from: "1.1.0")
+    .package(url: "https://github.com/team-unstablers/swift-msquic.git", from: "1.1.1")
 ]
 ```
 
@@ -166,7 +166,7 @@ MSQUIC_DEBUG=1 swift build
 
 ## Important Notes
 
-- **MsQuic Version**: The included binary is based on **MsQuic v2.5.7-rc**.
+- **MsQuic Version**: The included binary is based on **MsQuic v2.5.6**.
 - **Use SwiftMsQuicHelper**: It is strongly recommended to use the `SwiftMsQuicHelper` module instead of importing `MsQuic` directly. Swift's C Interop does not fully support C macros, making it impossible to access MsQuic status codes (which are macros) directly. `SwiftMsQuicHelper` provides proper Swift wrappers (e.g., `QuicStatus`) to handle this.
 - **Modifications**: This repository uses a fork of MsQuic maintained by **Team Unstablers Inc.** with the following change:
     - Removed `dlopen(3)` calls in `quic_bugcheck` to ensure compliance with iOS App Store review guidelines.
