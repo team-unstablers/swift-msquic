@@ -94,7 +94,7 @@ static CFArrayRef CopyEmptyCertificateArray(void) {
     STACK_OF(X509) *stack = (STACK_OF(X509) *)stackX509;
     int count = sk_X509_num(stack);
 
-    if (count <= 0) {
+    if (count <= 1) {
         return CopyEmptyCertificateArray();
     }
 
@@ -110,7 +110,7 @@ static CFArrayRef CopyEmptyCertificateArray(void) {
         return nil;
     }
 
-    for (int i = 0; i < count; i++) {
+    for (int i = 1; i < count; i++) {
         X509 *x509 = sk_X509_value(stack, i);
 
         NSError *certError = nil;
@@ -141,6 +141,8 @@ static CFArrayRef CopyEmptyCertificateArray(void) {
     }
 
     X509_STORE_CTX *context = (X509_STORE_CTX *)storeContext;
+    X509_verify_cert(context);
+    
     STACK_OF(X509) *stack = X509_STORE_CTX_get0_chain(context);
 
     return [self copySecCertificateArrayFromOpenSSLStackX509: stack error: error];
