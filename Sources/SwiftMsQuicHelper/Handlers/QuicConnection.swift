@@ -110,6 +110,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         var connectionState: State = .idle
         var connectContinuation: CheckedContinuation<Void, Error>?
         var shutdownContinuation: CheckedContinuation<Void, Never>?
+        var sendBufferingEnabled: Bool?
         var peerStreamHandler: StreamHandler?
         var eventHandler: EventHandler?
         var certificateValidationHandler: CertificateValidationHandler?
@@ -237,6 +238,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         
         internalState.withLock {
             $0.peerStreamHandler = streamHandler
+            $0.sendBufferingEnabled = configuration.sendBufferingEnabled
         }
         
         typealias ConnectionCallback = @convention(c) (HQUIC?, UnsafeMutableRawPointer?, UnsafeMutablePointer<QUIC_CONNECTION_EVENT>?) -> QuicStatusRawValue
@@ -283,6 +285,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
             internalState.withLock {
                 $0.connectContinuation = continuation
                 $0.connectionState = .connecting
+                $0.sendBufferingEnabled = configuration.sendBufferingEnabled
             }
             
             let status = serverName.withCString { serverNamePtr in
@@ -347,6 +350,10 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
     /// - Throws: ``QuicError`` if the stream cannot be created.
     public func openStream(flags: QuicStreamOpenFlags = .none) throws -> QuicStream {
         return try QuicStream(connection: self, flags: flags)
+    }
+
+    internal func currentSendBufferingEnabledSetting() -> Bool? {
+        internalState.withLock { $0.sendBufferingEnabled }
     }
 
     /// Sends a connection-level datagram.
@@ -787,7 +794,11 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         case .peerStreamStarted(let streamHandle, let flags):
             let handler = internalState.withLock { $0.peerStreamHandler }
             if let handler {
-                let stream = QuicStream(handle: streamHandle)
+                let stream = QuicStream(
+                    peerHandle: streamHandle,
+                    connection: self,
+                    sendBufferingEnabledHint: currentSendBufferingEnabledSetting()
+                )
                 Task {
                     await handler(self, stream, flags)
                 }

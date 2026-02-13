@@ -104,6 +104,9 @@ public struct QuicSettings {
     public var maximumMtu: UInt16?
 
     /// Enable send buffering in MsQuic.
+    ///
+    /// Set this to `false` to use ``QuicStream/sendChunks(_:finalFlags:options:)``
+    /// for IDEAL_SEND_BUFFER_SIZE-based multi in-flight sends.
     public var sendBufferingEnabled: Bool?
 
     /// Enable packet pacing.

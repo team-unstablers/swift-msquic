@@ -46,6 +46,11 @@ public final class QuicConfiguration: QuicObject {
     /// The registration this configuration belongs to.
     public let registration: QuicRegistration
 
+    /// Whether MsQuic stream send buffering is enabled for this configuration.
+    ///
+    /// `nil` means the default MsQuic behavior is used.
+    internal let sendBufferingEnabled: Bool?
+
     /// Creates a new configuration.
     ///
     /// - Parameters:
@@ -59,6 +64,7 @@ public final class QuicConfiguration: QuicObject {
         settings: QuicSettings? = nil
     ) throws {
         self.registration = registration
+        self.sendBufferingEnabled = settings?.sendBufferingEnabled
         super.init()
         
         guard let regHandle = registration.handle else {
