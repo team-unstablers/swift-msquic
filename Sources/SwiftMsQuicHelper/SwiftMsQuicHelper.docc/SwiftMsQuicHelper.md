@@ -12,6 +12,7 @@ SwiftMsQuicHelper provides a Swift-friendly interface to the MsQuic library, ena
 - **ARC-based Resource Management**: Automatic cleanup of MsQuic handles via deinit
 - **Swift Enums for Events**: Type-safe event handling with associated values
 - **OptionSet Flags**: Swift-native flag types for all MsQuic flags
+- **Non-buffered Windowed Send**: `sendChunks` provides IDEAL_SEND_BUFFER_SIZE-based multi in-flight stream send
 
 ### Supported Platforms
 

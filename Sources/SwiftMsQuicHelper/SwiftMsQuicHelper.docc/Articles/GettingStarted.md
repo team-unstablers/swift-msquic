@@ -32,9 +32,13 @@ let registration = try QuicRegistration(config: .init(
 ))
 
 // Create a configuration with ALPN
+var settings = QuicSettings()
+settings.sendBufferingEnabled = false // Required for sendChunks
+
 let configuration = try QuicConfiguration(
     registration: registration,
-    alpnBuffers: ["my-protocol"]
+    alpnBuffers: ["my-protocol"],
+    settings: settings
 )
 
 // For testing without certificate validation
@@ -59,8 +63,8 @@ let stream = try connection.openStream()
 try await stream.start()
 try stream.setPriority(0x9000) // 0xFFFF is highest priority
 
-let message = "Hello, QUIC!"
-try await stream.send(Data(message.utf8), flags: .fin)
+let chunks = [Data("Hello, ".utf8), Data("QUIC".utf8), Data("!".utf8)]
+try await stream.sendChunks(chunks, finalFlags: .fin)
 
 // Receive the response
 for try await data in stream.receive {
@@ -148,6 +152,34 @@ try stream.setPriority(0xFFFF) // highest
 let priority = try stream.getPriority()
 print("Current stream priority: \(priority)")
 ```
+
+## Non-buffered Windowed Send
+
+Use `sendChunks` to automatically maintain an in-flight send window from
+`IDEAL_SEND_BUFFER_SIZE` updates:
+
+```swift
+var settings = QuicSettings()
+settings.sendBufferingEnabled = false
+
+let configuration = try QuicConfiguration(
+    registration: registration,
+    alpnBuffers: ["my-protocol"],
+    settings: settings
+)
+
+let stream = try connection.openStream()
+try await stream.start()
+
+let chunks = [Data("a".utf8), Data("b".utf8), Data("c".utf8)]
+try await stream.sendChunks(
+    chunks,
+    finalFlags: .fin,
+    options: .init(bootstrapWindowBytes: 128 * 1024)
+)
+```
+
+`sendChunks` throws ``QuicError/invalidState`` unless `sendBufferingEnabled` is explicitly set to `false`.
 
 ## Next Steps
 

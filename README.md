@@ -11,6 +11,7 @@ This library simplifies the usage of the QUIC protocol in Swift applications on 
 - **Prebuilt Binaries**: Includes `MsQuic.xcframework` (`v2.5.6-tuvariant`), so you don't need to build MsQuic from source.
 - **iOS Compatible**: Modified to comply with iOS App Store guidelines (removed `dlopen` calls).
 - **Stream Scheduling Controls**: Supports connection-level stream scheduling (`fifo` / `roundRobin`) and per-stream priority.
+- **Non-buffered Windowed Send**: Supports `IDEAL_SEND_BUFFER_SIZE`-driven multi in-flight stream send via `sendChunks`.
 
 ## Requirements
 
@@ -63,7 +64,9 @@ defer { SwiftMsQuicAPI.close() }
 func runClient() async throws {
     // 1. Create Registration & Configuration
     let reg = try QuicRegistration(config: .init(appName: "MyClient", executionProfile: .lowLatency))
-    let config = try QuicConfiguration(registration: reg, alpnBuffers: ["my-proto"])
+    var settings = QuicSettings()
+    settings.sendBufferingEnabled = false
+    let config = try QuicConfiguration(registration: reg, alpnBuffers: ["my-proto"], settings: settings)
     
     // Disable certificate validation for testing (NOT for production)
     try config.loadCredential(.init(type: .none, flags: [.client, .noCertificateValidation]))
@@ -80,7 +83,8 @@ func runClient() async throws {
     try await stream.start()
     try stream.setPriority(0x9000) // 0xFFFF is highest priority
     
-    try await stream.send(Data("Hello".utf8), flags: .fin)
+    let chunks = [Data("Hello ".utf8), Data("MsQuic".utf8), Data("!".utf8)]
+    try await stream.sendChunks(chunks, finalFlags: .fin)
     
     // 4. Receive Data
     for try await data in stream.receive {
@@ -151,6 +155,38 @@ try stream.setPriority(0xFFFF) // highest
 let priority = try stream.getPriority()
 print("Current stream priority: \(priority)")
 ```
+
+### 5. Non-buffered Windowed Send
+
+`sendChunks` uses MsQuic `IDEAL_SEND_BUFFER_SIZE` to keep multiple sends in-flight.
+
+```swift
+var settings = QuicSettings()
+settings.sendBufferingEnabled = false
+
+let config = try QuicConfiguration(
+    registration: reg,
+    alpnBuffers: ["my-proto"],
+    settings: settings
+)
+
+let stream = try connection.openStream()
+try await stream.start()
+
+let chunks = [
+    Data("chunk-1".utf8),
+    Data("chunk-2".utf8),
+    Data("chunk-3".utf8)
+]
+
+try await stream.sendChunks(
+    chunks,
+    finalFlags: .fin,
+    options: .init(bootstrapWindowBytes: 128 * 1024)
+)
+```
+
+`sendChunks` throws `QuicError.invalidState` when `sendBufferingEnabled` is not explicitly set to `false`.
 
 ## Debug Build
 
