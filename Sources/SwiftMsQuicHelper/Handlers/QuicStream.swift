@@ -54,7 +54,8 @@ import Darwin
 /// ### Data Transfer
 ///
 /// - ``send(_:flags:)``
-/// - ``sendChunks(_:finalFlags:options:)``
+/// - ``enqueue(_:)``
+/// - ``drain(finalFlags:)``
 /// - ``receive``
 /// - ``setPriority(_:)``
 /// - ``getPriority()``
@@ -74,31 +75,8 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
         case closed
     }
 
-    /// Options for non-buffered, windowed multi-send.
-    ///
-    /// `bootstrapWindowBytes` is used until MsQuic reports
-    /// `QUIC_STREAM_EVENT_IDEAL_SEND_BUFFER_SIZE`.
-    public struct NonBufferedSendOptions: Sendable {
-        /// Temporary in-flight send window used before the first ideal window update.
-        public var bootstrapWindowBytes: UInt64
-
-        /// Creates new options for non-buffered send windowing.
-        ///
-        /// - Parameter bootstrapWindowBytes: Initial in-flight byte window before ideal size is known.
-        public init(bootstrapWindowBytes: UInt64 = 64 * 1024) {
-            self.bootstrapWindowBytes = bootstrapWindowBytes
-        }
-    }
-
-    private struct WindowedSendOperation {
-        var chunks: [Data]
-        var nextChunkIndex: Int
-        var inFlightBytes: UInt64
-        var inFlightChunkCount: Int
-        let finalFlags: QuicSendFlags
-        let options: NonBufferedSendOptions
-        let continuation: CheckedContinuation<Void, Error>
-    }
+    private static let nonBufferedBootstrapWindowBytes: UInt64 = 64 * 1024
+    private static let nonBufferedQueueWindowMultiplier: UInt64 = 4
 
     private struct InternalState: Sendable {
         var streamState: State = .idle
@@ -106,18 +84,25 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
         var shutdownContinuation: CheckedContinuation<Void, Never>?
         var receiveContinuation: AsyncThrowingStream<Data, Error>.Continuation?
         var activeSingleSendCount: Int = 0
+
         var idealSendBufferBytes: UInt64 = 0
-        var windowedSendOperation: WindowedSendOperation?
-        var windowedSendContextTokens: Set<UInt> = []
+        var drainQueuedData: [Data] = []
+        var drainQueuedBytes: UInt64 = 0
+        var drainInFlightBytes: UInt64 = 0
+        var drainInFlightCount: Int = 0
+        var drainPendingFinalFlags: QuicSendFlags = .none
+        var drainContinuation: CheckedContinuation<Void, Error>?
+        var drainSendContextTokens: Set<UInt> = []
+        var enqueueBlockedForFinalDrain: Bool = false
     }
     private var stateLock = os_unfair_lock_s()
     private var internalState = InternalState()
 
     @inline(__always)
-    private func withStateLock<T>(_ body: (inout InternalState) -> T) -> T {
+    private func withStateLock<T>(_ body: (inout InternalState) throws -> T) rethrows -> T {
         os_unfair_lock_lock(&stateLock)
         defer { os_unfair_lock_unlock(&stateLock) }
-        return body(&internalState)
+        return try body(&internalState)
     }
 
     /// The current state of the stream.
@@ -135,51 +120,47 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
 
     private class SendContext {
         let continuation: CheckedContinuation<Void, Error>
-        let buffer: UnsafeMutableRawBufferPointer
+        let storage: NSData
         let quicBuffer: UnsafeMutablePointer<QUIC_BUFFER>
         
         init(_ c: CheckedContinuation<Void, Error>, data: Data) {
             self.continuation = c
-            self.buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: data.count, alignment: 1)
-            if data.count > 0 {
-                data.copyBytes(to: self.buffer)
-            }
+            self.storage = data as NSData
             self.quicBuffer = UnsafeMutablePointer<QUIC_BUFFER>.allocate(capacity: 1)
-            let bytePtr = data.count > 0 ? self.buffer.bindMemory(to: UInt8.self).baseAddress : nil
+            let bytePtr: UnsafeMutablePointer<UInt8>? = data.count > 0
+                ? UnsafeMutablePointer<UInt8>(mutating: storage.bytes.assumingMemoryBound(to: UInt8.self))
+                : nil
             self.quicBuffer.initialize(to: QUIC_BUFFER(Length: UInt32(data.count), Buffer: bytePtr))
         }
         
         deinit {
             quicBuffer.deinitialize(count: 1)
             quicBuffer.deallocate()
-            buffer.deallocate()
         }
     }
 
-    private class WindowedSendChunkContext {
+    private class DrainSendContext {
         let byteCount: UInt64
-        let buffer: UnsafeMutableRawBufferPointer
+        let storage: NSData
         let quicBuffer: UnsafeMutablePointer<QUIC_BUFFER>
 
         init(data: Data) {
             self.byteCount = UInt64(data.count)
-            self.buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: data.count, alignment: 1)
-            if data.count > 0 {
-                data.copyBytes(to: self.buffer)
-            }
+            self.storage = data as NSData
             self.quicBuffer = UnsafeMutablePointer<QUIC_BUFFER>.allocate(capacity: 1)
-            let bytePtr = data.count > 0 ? self.buffer.bindMemory(to: UInt8.self).baseAddress : nil
+            let bytePtr: UnsafeMutablePointer<UInt8>? = data.count > 0
+                ? UnsafeMutablePointer<UInt8>(mutating: storage.bytes.assumingMemoryBound(to: UInt8.self))
+                : nil
             self.quicBuffer.initialize(to: QUIC_BUFFER(Length: UInt32(data.count), Buffer: bytePtr))
         }
 
         deinit {
             quicBuffer.deinitialize(count: 1)
             quicBuffer.deallocate()
-            buffer.deallocate()
         }
     }
 
-    private enum WindowedPumpAction {
+    private enum DrainPumpAction {
         case idle
         case complete(CheckedContinuation<Void, Error>)
         case sendChunk(Data, QuicSendFlags)
@@ -281,88 +262,96 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
         withStateLock { $0.receiveContinuation = continuation }
     }
 
-    private func ensureWindowedSendAvailable() throws {
+    private func ensureNonBufferedSendAvailable() throws {
         let effectiveHint: Bool? = sendBufferingEnabledHint ?? connection?.currentSendBufferingEnabledSetting()
         guard effectiveHint == false else {
             throw QuicError.invalidState
         }
     }
 
-    private func reserveNextWindowedSendAction() -> WindowedPumpAction {
+    private static func drainWindowBytes(for idealSendBufferBytes: UInt64) -> UInt64 {
+        max(1, max(idealSendBufferBytes, nonBufferedBootstrapWindowBytes))
+    }
+
+    private static func maxQueuedBytes(for idealSendBufferBytes: UInt64) -> UInt64 {
+        let window = drainWindowBytes(for: idealSendBufferBytes)
+        let (maxQueuedBytes, overflow) = window.multipliedReportingOverflow(by: nonBufferedQueueWindowMultiplier)
+        return overflow ? UInt64.max : maxQueuedBytes
+    }
+
+    private func abortDrainLocked(_ state: inout InternalState) -> CheckedContinuation<Void, Error>? {
+        let continuation = state.drainContinuation
+        state.drainContinuation = nil
+        state.drainQueuedData.removeAll()
+        state.drainQueuedBytes = 0
+        state.drainInFlightBytes = 0
+        state.drainInFlightCount = 0
+        state.drainPendingFinalFlags = .none
+        state.enqueueBlockedForFinalDrain = false
+        return continuation
+    }
+
+    private func reserveNextDrainAction() -> DrainPumpAction {
         withStateLock { state in
-            guard var operation = state.windowedSendOperation else {
+            guard let continuation = state.drainContinuation else {
                 return .idle
             }
 
-            if operation.nextChunkIndex >= operation.chunks.count {
-                if operation.inFlightChunkCount == 0 {
-                    state.windowedSendOperation = nil
-                    return .complete(operation.continuation)
+            if let nextChunk = state.drainQueuedData.first {
+                let nextChunkBytes = UInt64(nextChunk.count)
+                let windowBytes = Self.drainWindowBytes(for: state.idealSendBufferBytes)
+                let wouldExceedWindow = state.drainInFlightBytes + nextChunkBytes > windowBytes
+
+                if state.drainInFlightCount > 0 && wouldExceedWindow {
+                    return .idle
                 }
-                state.windowedSendOperation = operation
+
+                let consumeFinalFlags = state.drainPendingFinalFlags != .none && state.drainQueuedData.count == 1
+                let flags = consumeFinalFlags ? state.drainPendingFinalFlags : .none
+                if consumeFinalFlags {
+                    state.drainPendingFinalFlags = .none
+                }
+
+                state.drainQueuedData.removeFirst()
+                if state.drainQueuedBytes >= nextChunkBytes {
+                    state.drainQueuedBytes -= nextChunkBytes
+                } else {
+                    state.drainQueuedBytes = 0
+                }
+                state.drainInFlightCount += 1
+                state.drainInFlightBytes += nextChunkBytes
+
+                return .sendChunk(nextChunk, flags)
+            }
+
+            if state.drainInFlightCount > 0 {
                 return .idle
             }
 
-            let initialWindow = max(1, operation.options.bootstrapWindowBytes)
-            let windowBytes = max(state.idealSendBufferBytes, initialWindow)
-            let nextChunk = operation.chunks[operation.nextChunkIndex]
-            let nextChunkBytes = UInt64(nextChunk.count)
-            let wouldExceedWindow = operation.inFlightBytes + nextChunkBytes > windowBytes
-
-            if operation.inFlightChunkCount > 0 && wouldExceedWindow {
-                state.windowedSendOperation = operation
-                return .idle
+            if state.drainPendingFinalFlags != .none {
+                let flags = state.drainPendingFinalFlags
+                state.drainPendingFinalFlags = .none
+                state.drainInFlightCount += 1
+                return .sendChunk(Data(), flags)
             }
 
-            let isLastChunk = operation.nextChunkIndex == operation.chunks.count - 1
-            let chunkFlags: QuicSendFlags = isLastChunk ? operation.finalFlags : .none
-
-            operation.nextChunkIndex += 1
-            operation.inFlightChunkCount += 1
-            operation.inFlightBytes += nextChunkBytes
-            state.windowedSendOperation = operation
-
-            return .sendChunk(nextChunk, chunkFlags)
+            state.drainContinuation = nil
+            state.enqueueBlockedForFinalDrain = false
+            return .complete(continuation)
         }
     }
 
-    private func rollbackReservedWindowedChunk(_ byteCount: UInt64) -> CheckedContinuation<Void, Error>? {
-        withStateLock { state in
-            guard var operation = state.windowedSendOperation else {
-                return nil
-            }
-            if operation.nextChunkIndex > 0 {
-                operation.nextChunkIndex -= 1
-            }
-            if operation.inFlightChunkCount > 0 {
-                operation.inFlightChunkCount -= 1
-            }
-            if operation.inFlightBytes >= byteCount {
-                operation.inFlightBytes -= byteCount
-            } else {
-                operation.inFlightBytes = 0
-            }
-
-            state.windowedSendOperation = nil
-            return operation.continuation
-        }
-    }
-
-    private func pumpWindowedSend() {
+    private func pumpDrainSend() {
         while true {
             guard let handle else {
                 let continuation = withStateLock { state -> CheckedContinuation<Void, Error>? in
-                    guard let operation = state.windowedSendOperation else {
-                        return nil
-                    }
-                    state.windowedSendOperation = nil
-                    return operation.continuation
+                    abortDrainLocked(&state)
                 }
                 continuation?.resume(throwing: QuicError.invalidState)
                 return
             }
 
-            switch reserveNextWindowedSendAction() {
+            switch reserveNextDrainAction() {
             case .idle:
                 return
 
@@ -371,12 +360,12 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
                 return
 
             case .sendChunk(let data, let flags):
-                let context = WindowedSendChunkContext(data: data)
+                let context = DrainSendContext(data: data)
                 let contextPtr = Unmanaged.passRetained(context as AnyObject).toOpaque()
                 let contextToken = UInt(bitPattern: contextPtr)
 
                 _ = withStateLock {
-                    $0.windowedSendContextTokens.insert(contextToken)
+                    $0.drainSendContextTokens.insert(contextToken)
                 }
 
                 let status = QuicStatus(
@@ -392,10 +381,11 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
                 if status.failed {
                     let _ = Unmanaged<AnyObject>.fromOpaque(contextPtr).takeRetainedValue()
                     _ = withStateLock {
-                        $0.windowedSendContextTokens.remove(contextToken)
+                        $0.drainSendContextTokens.remove(contextToken)
                     }
-
-                    let continuation = rollbackReservedWindowedChunk(context.byteCount)
+                    let continuation = withStateLock { state in
+                        abortDrainLocked(&state)
+                    }
                     continuation?.resume(throwing: QuicError(status: status))
                     return
                 }
@@ -403,35 +393,39 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
         }
     }
 
-    private func finishWindowedChunk(token: UInt, byteCount: UInt64, canceled: Bool) -> (CheckedContinuation<Void, Error>?, Bool) {
+    private func finishDrainChunk(token: UInt, byteCount: UInt64, canceled: Bool) -> (CheckedContinuation<Void, Error>?, Bool) {
         withStateLock { state in
-            state.windowedSendContextTokens.remove(token)
+            state.drainSendContextTokens.remove(token)
 
-            guard var operation = state.windowedSendOperation else {
+            if state.drainInFlightCount > 0 {
+                state.drainInFlightCount -= 1
+            }
+            if state.drainInFlightBytes >= byteCount {
+                state.drainInFlightBytes -= byteCount
+            } else {
+                state.drainInFlightBytes = 0
+            }
+
+            guard state.drainContinuation != nil else {
                 return (nil, false)
             }
 
-            if operation.inFlightChunkCount > 0 {
-                operation.inFlightChunkCount -= 1
-            }
-            if operation.inFlightBytes >= byteCount {
-                operation.inFlightBytes -= byteCount
-            } else {
-                operation.inFlightBytes = 0
-            }
-
             if canceled {
-                state.windowedSendOperation = nil
-                return (operation.continuation, false)
+                return (abortDrainLocked(&state), false)
             }
 
-            if operation.nextChunkIndex >= operation.chunks.count, operation.inFlightChunkCount == 0 {
-                state.windowedSendOperation = nil
-                return (operation.continuation, false)
+            if !state.drainQueuedData.isEmpty || state.drainPendingFinalFlags != .none {
+                return (nil, true)
             }
 
-            state.windowedSendOperation = operation
-            return (nil, true)
+            if state.drainInFlightCount > 0 {
+                return (nil, false)
+            }
+
+            let continuation = state.drainContinuation
+            state.drainContinuation = nil
+            state.enqueueBlockedForFinalDrain = false
+            return (continuation, false)
         }
     }
 
@@ -473,6 +467,8 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
     ///
     /// This method queues data for sending and returns when the send is complete.
     ///
+    /// - Important: Do not call this concurrently with ``enqueue(_:)`` / ``drain(finalFlags:)`` on the same stream.
+    ///
     /// - Parameters:
     ///   - data: The data to send.
     ///   - flags: Flags controlling send behavior. Use `.fin` to indicate this is the last send.
@@ -482,7 +478,13 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
 
         return try await withCheckedThrowingContinuation { continuation in
             let canSend = withStateLock { state -> Bool in
-                guard state.windowedSendOperation == nil else {
+                guard state.drainContinuation == nil else {
+                    return false
+                }
+                guard state.drainQueuedData.isEmpty else {
+                    return false
+                }
+                guard state.drainInFlightCount == 0 else {
                     return false
                 }
                 state.activeSingleSendCount += 1
@@ -518,61 +520,72 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
         }
     }
 
-    /// Sends multiple chunks with an IDEAL_SEND_BUFFER_SIZE-based in-flight window.
+    /// Enqueues data for non-buffered drain-mode sending.
+    ///
+    /// The data reference is retained by the stream until sent via ``drain(finalFlags:)``.
     ///
     /// This API is only available when the stream's connection uses
     /// `QuicSettings.sendBufferingEnabled = false`.
     ///
-    /// - Important: Do not call ``send(_:flags:)`` concurrently with this API on the same stream.
-    ///
-    /// - Parameters:
-    ///   - chunks: Data chunks to send in order.
-    ///   - finalFlags: Send flags applied only to the final chunk (for example `.fin`).
-    ///   - options: Non-buffered send window options.
-    /// - Throws: ``QuicError`` if the stream is invalid, buffering mode is incompatible, or send fails.
-    public func sendChunks<S: Sequence>(
-        _ chunks: S,
-        finalFlags: QuicSendFlags = .none,
-        options: NonBufferedSendOptions = .init()
-    ) async throws where S.Element == Data {
+    /// - Parameter data: A chunk to append to the pending send queue.
+    /// - Throws: ``QuicError`` if buffering mode is incompatible, the queue is over limit, or the stream is in an invalid state.
+    public func enqueue(_ data: Data) throws {
         guard handle != nil else {
             throw QuicError.invalidState
         }
-        guard options.bootstrapWindowBytes > 0 else {
+        guard data.count <= Int(UInt32.max) else {
             throw QuicError.invalidParameter
         }
-        try ensureWindowedSendAvailable()
+        try ensureNonBufferedSendAvailable()
 
-        var preparedChunks = Array(chunks)
-        for chunk in preparedChunks where chunk.count > Int(UInt32.max) {
-            throw QuicError.invalidParameter
-        }
+        let byteCount = UInt64(data.count)
 
-        if preparedChunks.isEmpty {
-            if finalFlags == .none {
-                return
+        try withStateLock { state in
+            guard state.activeSingleSendCount == 0 else {
+                throw QuicError.invalidState
             }
-            preparedChunks = [Data()]
+            guard !state.enqueueBlockedForFinalDrain else {
+                throw QuicError.invalidState
+            }
+
+            let queueLimit = Self.maxQueuedBytes(for: state.idealSendBufferBytes)
+            if state.drainQueuedBytes + byteCount > queueLimit {
+                throw QuicError.invalidState
+            }
+
+            state.drainQueuedData.append(data)
+            state.drainQueuedBytes += byteCount
         }
+    }
+
+    /// Starts draining queued chunks using IDEAL_SEND_BUFFER_SIZE-based in-flight windowing.
+    ///
+    /// This API is only available when the stream's connection uses
+    /// `QuicSettings.sendBufferingEnabled = false`.
+    ///
+    /// `drain` returns only when all queued chunks and in-flight sends complete.
+    /// If `finalFlags` is non-empty, the flags are applied to the final send in this drain cycle.
+    ///
+    /// - Parameter finalFlags: Optional flags applied to the final send of this drain cycle.
+    /// - Throws: ``QuicError`` if buffering mode is incompatible, a drain is already active, or send fails.
+    public func drain(finalFlags: QuicSendFlags = .none) async throws {
+        guard handle != nil else {
+            throw QuicError.invalidState
+        }
+        try ensureNonBufferedSendAvailable()
 
         return try await withCheckedThrowingContinuation { continuation in
             let canStart = withStateLock { state -> Bool in
-                if state.activeSingleSendCount > 0 {
+                guard state.activeSingleSendCount == 0 else {
                     return false
                 }
-                if state.windowedSendOperation != nil {
+                guard state.drainContinuation == nil else {
                     return false
                 }
 
-                state.windowedSendOperation = WindowedSendOperation(
-                    chunks: preparedChunks,
-                    nextChunkIndex: 0,
-                    inFlightBytes: 0,
-                    inFlightChunkCount: 0,
-                    finalFlags: finalFlags,
-                    options: options,
-                    continuation: continuation
-                )
+                state.drainContinuation = continuation
+                state.drainPendingFinalFlags = finalFlags
+                state.enqueueBlockedForFinalDrain = finalFlags != .none
                 return true
             }
 
@@ -581,7 +594,7 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
                 return
             }
 
-            pumpWindowedSend()
+            pumpDrainSend()
         }
     }
 
@@ -726,10 +739,10 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
                     } else {
                         sendContext.continuation.resume()
                     }
-                } else if let windowedContext = retained as? WindowedSendChunkContext {
-                    let (continuation, shouldPump) = finishWindowedChunk(
+                } else if let drainContext = retained as? DrainSendContext {
+                    let (continuation, shouldPump) = finishDrainChunk(
                         token: contextToken,
-                        byteCount: windowedContext.byteCount,
+                        byteCount: drainContext.byteCount,
                         canceled: canceled
                     )
 
@@ -740,7 +753,7 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
                             continuation.resume()
                         }
                     } else if shouldPump {
-                        pumpWindowedSend()
+                        pumpDrainSend()
                     }
                 }
             }
@@ -758,23 +771,22 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
         case .idealSendBufferSize(let byteCount):
             let shouldPump = withStateLock { state -> Bool in
                 state.idealSendBufferBytes = byteCount
-                return state.windowedSendOperation != nil
+                return state.drainContinuation != nil
             }
             if shouldPump {
-                pumpWindowedSend()
+                pumpDrainSend()
             }
 
         case .shutdownComplete:
-            let (shutdownContinuation, sendContinuation) = withStateLock { state -> (CheckedContinuation<Void, Never>?, CheckedContinuation<Void, Error>?) in
+            let (shutdownContinuation, drainContinuation) = withStateLock { state -> (CheckedContinuation<Void, Never>?, CheckedContinuation<Void, Error>?) in
                 state.streamState = .closed
                 let c = state.shutdownContinuation
                 state.shutdownContinuation = nil
-                let send = state.windowedSendOperation?.continuation
-                state.windowedSendOperation = nil
-                return (c, send)
+                let drain = abortDrainLocked(&state)
+                return (c, drain)
             }
             shutdownContinuation?.resume()
-            sendContinuation?.resume(throwing: QuicError.aborted)
+            drainContinuation?.resume(throwing: QuicError.aborted)
             Task {
                 self.releaseSelfFromCallback()
             }
@@ -787,23 +799,22 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
     }
 
     deinit {
-        let (receiveContinuation, shutdownContinuation, windowedSendContinuation, windowedTokens) = withStateLock { state in
+        let (receiveContinuation, shutdownContinuation, drainContinuation, drainTokens) = withStateLock { state in
             let receive = state.receiveContinuation
             state.receiveContinuation = nil
 
             let shutdown = state.shutdownContinuation
             state.shutdownContinuation = nil
 
-            let send = state.windowedSendOperation?.continuation
-            state.windowedSendOperation = nil
+            let drain = abortDrainLocked(&state)
 
-            let tokens = Array(state.windowedSendContextTokens)
-            state.windowedSendContextTokens.removeAll()
+            let tokens = Array(state.drainSendContextTokens)
+            state.drainSendContextTokens.removeAll()
 
-            return (receive, shutdown, send, tokens)
+            return (receive, shutdown, drain, tokens)
         }
 
-        for token in windowedTokens {
+        for token in drainTokens {
             guard let ptr = UnsafeMutableRawPointer(bitPattern: token) else {
                 continue
             }
@@ -816,6 +827,6 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
 
         receiveContinuation?.finish()
         shutdownContinuation?.resume()
-        windowedSendContinuation?.resume(throwing: QuicError.aborted)
+        drainContinuation?.resume(throwing: QuicError.aborted)
     }
 }

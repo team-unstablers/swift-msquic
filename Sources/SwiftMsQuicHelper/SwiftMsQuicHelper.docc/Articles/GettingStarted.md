@@ -33,7 +33,7 @@ let registration = try QuicRegistration(config: .init(
 
 // Create a configuration with ALPN
 var settings = QuicSettings()
-settings.sendBufferingEnabled = false // Required for sendChunks
+settings.sendBufferingEnabled = false // Required for enqueue/drain
 
 let configuration = try QuicConfiguration(
     registration: registration,
@@ -64,7 +64,10 @@ try await stream.start()
 try stream.setPriority(0x9000) // 0xFFFF is highest priority
 
 let chunks = [Data("Hello, ".utf8), Data("QUIC".utf8), Data("!".utf8)]
-try await stream.sendChunks(chunks, finalFlags: .fin)
+for chunk in chunks {
+    try stream.enqueue(chunk)
+}
+try await stream.drain(finalFlags: .fin)
 
 // Receive the response
 for try await data in stream.receive {
@@ -153,9 +156,9 @@ let priority = try stream.getPriority()
 print("Current stream priority: \(priority)")
 ```
 
-## Non-buffered Windowed Send
+## Non-buffered Enqueue/Drain Send
 
-Use `sendChunks` to automatically maintain an in-flight send window from
+Use `enqueue` + `drain` to automatically maintain an in-flight send window from
 `IDEAL_SEND_BUFFER_SIZE` updates:
 
 ```swift
@@ -172,14 +175,13 @@ let stream = try connection.openStream()
 try await stream.start()
 
 let chunks = [Data("a".utf8), Data("b".utf8), Data("c".utf8)]
-try await stream.sendChunks(
-    chunks,
-    finalFlags: .fin,
-    options: .init(bootstrapWindowBytes: 128 * 1024)
-)
+for chunk in chunks {
+    try stream.enqueue(chunk)
+}
+try await stream.drain(finalFlags: .fin)
 ```
 
-`sendChunks` throws ``QuicError/invalidState`` unless `sendBufferingEnabled` is explicitly set to `false`.
+``QuicStream/enqueue(_:)`` and ``QuicStream/drain(finalFlags:)`` throw ``QuicError/invalidState`` unless `sendBufferingEnabled` is explicitly set to `false`.
 
 ## Next Steps
 

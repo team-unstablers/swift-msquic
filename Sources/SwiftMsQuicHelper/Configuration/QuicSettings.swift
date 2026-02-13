@@ -105,8 +105,9 @@ public struct QuicSettings {
 
     /// Enable send buffering in MsQuic.
     ///
-    /// Set this to `false` to use ``QuicStream/sendChunks(_:finalFlags:options:)``
-    /// for IDEAL_SEND_BUFFER_SIZE-based multi in-flight sends.
+    /// Set this to `false` to use ``QuicStream/enqueue(_:)`` and
+    /// ``QuicStream/drain(finalFlags:)`` with IDEAL_SEND_BUFFER_SIZE-based
+    /// multi in-flight send control.
     public var sendBufferingEnabled: Bool?
 
     /// Enable packet pacing.
