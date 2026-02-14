@@ -191,10 +191,11 @@ public final class QuicListener: QuicObject, @unchecked Sendable {
                 $0.stopContinuation = nil
                 return c
             }
+            // Release self-ref synchronously before resuming the continuation.
+            // The caller still holds a strong reference, so deinit won't fire on the callback thread.
+            // deinit (and thus ListenerClose) will run safely when the caller releases its reference.
+            self.releaseSelfFromCallback()
             continuation?.resume()
-            Task {
-                self.releaseSelfFromCallback()
-            }
             return .success
             
         default:
