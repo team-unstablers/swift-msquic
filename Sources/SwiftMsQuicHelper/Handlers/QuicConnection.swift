@@ -742,12 +742,11 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
                 let sendContext = Unmanaged<DatagramSendContext>.fromOpaque(contextPtr).takeRetainedValue()
                 sendContext.continuation.resume(throwing: QuicError.aborted)
             }
+            // Release self-ref synchronously before resuming continuations.
+            // The caller still holds a strong reference, so deinit won't fire on the callback thread.
+            self.releaseSelfFromCallback()
             shutdownContinuation?.resume()
             connectContinuation?.resume(throwing: QuicError.aborted)
-            
-            Task {
-                self.releaseSelfFromCallback()
-            }
 
         case .datagramSendStateChanged(let state, let context):
             guard let context else {

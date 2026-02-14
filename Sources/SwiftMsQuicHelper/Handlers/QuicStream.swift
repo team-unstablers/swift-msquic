@@ -408,10 +408,10 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
                 state.shutdownContinuation = nil
                 return c
             }
+            // Release self-ref synchronously before resuming the continuation.
+            // The caller still holds a strong reference, so deinit won't fire on the callback thread.
+            self.releaseSelfFromCallback()
             continuation?.resume()
-            Task {
-                self.releaseSelfFromCallback()
-            }
             
         default:
             break
