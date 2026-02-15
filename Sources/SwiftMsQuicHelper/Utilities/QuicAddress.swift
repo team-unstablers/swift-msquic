@@ -31,7 +31,7 @@ import Glibc
 /// let address = QuicAddress(ip: "::1", port: 443)
 /// ```
 public struct QuicAddress: CustomStringConvertible, Sendable {
-    internal var raw: QUIC_ADDR
+    private(set) public var raw: QUIC_ADDR
 
     /// Creates an address from a raw MsQuic address.
     ///
@@ -125,22 +125,27 @@ public struct QuicAddress: CustomStringConvertible, Sendable {
         }
     }
 
-    /// A human-readable description of the address (e.g., "192.168.1.1:443").
+    /// A human-readable description of the address
+    /// (e.g., "192.168.1.1:443" or "[::1]:443").
     public var description: String {
         var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
         
         switch family {
         case .ipv4:
             var addr = raw.Ipv4.sin_addr
-            inet_ntop(AF_INET, &addr, &buffer, socklen_t(INET6_ADDRSTRLEN))
+            guard inet_ntop(AF_INET, &addr, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil else {
+                return "Invalid IPv4:\(port)"
+            }
+            return String(cString: buffer) + ":\(port)"
         case .ipv6:
             var addr = raw.Ipv6.sin6_addr
-            inet_ntop(AF_INET6, &addr, &buffer, socklen_t(INET6_ADDRSTRLEN))
+            guard inet_ntop(AF_INET6, &addr, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil else {
+                return "Invalid IPv6:\(port)"
+            }
+            return "[\(String(cString: buffer))]:\(port)"
         default:
             return "Unspecified"
         }
-        
-        return String(cString: buffer) + ":\(port)"
     }
     
     internal func withUnsafeAddress<T>(_ body: (UnsafePointer<QUIC_ADDR>) throws -> T) rethrows -> T {
