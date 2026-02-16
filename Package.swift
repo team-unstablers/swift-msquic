@@ -21,13 +21,13 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "MsQuic",
-            url: "https://github.com/team-unstablers/msquic/releases/download/v2.5.6-tuvariant%2Binmemory-pem-r2/MsQuic-2.5.6-tuvariant+inmemory-pem-r2-RELEASE-darwin-multiarch-static-unsigned.zip",
-            checksum: "08a7c2883c18e2c01b6df36bbec739d9400be240ed2396b0bb966f0be18c798e",
+            url: "https://github.com/team-unstablers/msquic/releases/download/v2.5.6-tuvariant%2Binmemory-pem-r2/MsQuic-2.5.6-tuvariant+inmemory-pem-r2-RELEASE-darwin-multiarch-static-unsigned-rebuild.zip",
+            checksum: "be40ef8bfd6f1e68b364e8f141b2e678d0cd8c7be47f6d2281ab09e4c2297c48",
         ),
         .binaryTarget(
             name: "MsQuicDebug",
-            url: "https://github.com/team-unstablers/msquic/releases/download/v2.5.6-tuvariant%2Binmemory-pem-r2/MsQuic-2.5.6-tuvariant+inmemory-pem-r2-DEBUG-darwin-multiarch-static-unsigned.zip",
-            checksum: "a6b02d8969fbb1379b9b82fd9e75b66a5f20a1b71319552d8f35ba713e83f0e1",
+            url: "https://github.com/team-unstablers/msquic/releases/download/v2.5.6-tuvariant%2Binmemory-pem-r2/MsQuic-2.5.6-tuvariant+inmemory-pem-r2-DEBUG-darwin-multiarch-static-unsigned-rebuild.zip",
+            checksum: "700bde4df192d105fbfa7368d744d9f4ac2dd70a57f093028b564dce78bb76b1",
         ),
         .target(
             name: "SwiftMsQuicOpenSSLUtils",
