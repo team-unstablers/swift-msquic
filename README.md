@@ -24,7 +24,7 @@ Add `swift-msquic` to your `Package.swift` dependencies:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/team-unstablers/swift-msquic.git", from: "1.1.1")
+    .package(url: "https://github.com/team-unstablers/swift-msquic.git", from: "1.1.2")
 ]
 ```
 
