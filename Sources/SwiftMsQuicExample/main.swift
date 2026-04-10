@@ -145,7 +145,7 @@ struct App {
         listener.onNewConnection { listener, info in
             print("[Server] New connection from \(info.remoteAddress)")
 
-            let connection = try info.accept(configuration: config) { conn, stream, flags in
+            let connection = try info.accept(configuration: config) { _, conn, stream, flags in
                 let direction = flags.contains(.unidirectional) ? "unidirectional" : "bidirectional"
                 print("[Server] Stream started (\(direction))")
                 do {

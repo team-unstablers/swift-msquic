@@ -133,11 +133,22 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
 
     /// A handler for processing incoming streams initiated by the peer.
     ///
+    /// The first parameter is an `isolated (any Actor)?` (SE-0420). Pass the
+    /// actor that owns the downstream work when calling `onPeerStreamStarted`
+    /// or `info.accept` so that the handler body runs on that actor without
+    /// an extra hop. Pass `nil` to run with no actor isolation.
+    ///
     /// - Parameters:
+    ///   - isolation: The actor the handler body is isolated to, if any.
     ///   - connection: The connection that received the stream.
     ///   - stream: The new stream initiated by the peer.
     ///   - flags: Open flags describing the peer stream direction/properties.
-    public typealias StreamHandler = @Sendable (QuicConnection, QuicStream, QuicStreamOpenFlags) async -> Void
+    public typealias StreamHandler = @Sendable (
+        _ isolation: isolated (any Actor)?,
+        _ connection: QuicConnection,
+        _ stream: QuicStream,
+        _ flags: QuicStreamOpenFlags
+    ) async -> Void
 
     /// A handler for processing connection events.
     ///
@@ -818,8 +829,19 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         case .peerStreamStarted(let stream, let flags):
             let handler = internalState.withLock { $0.peerStreamHandler }
             if let handler {
-                Task {
-                    await handler(self, stream, flags)
+                // Use `[weak self]` because the connection is already kept
+                // alive for the duration of MsQuic callbacks via
+                // `retainSelfForCallback()`. A strong capture here would
+                // only prolong the lifetime of the detached Task beyond
+                // what the user has opted into.
+                Task { [weak self] in
+                    guard let self else { return }
+                    // Passing `nil` means the handler body runs with no
+                    // actor isolation. Users that want to hop onto a
+                    // specific actor should wrap the call in a method
+                    // isolated to that actor and forward the `isolated`
+                    // parameter through.
+                    await handler(nil, self, stream, flags)
                 }
             }
 
