@@ -8,20 +8,21 @@
 - 2026-03-23 기준: 로컬에서 연 `QuicStream`의 `connection` 프로퍼티는 `weak` back-reference입니다. 클라이언트 종료 시에는 활성 stream/task 참조를 먼저 정리해야 `QuicConnection`/`QuicRegistration` 해제가 지연되지 않습니다.
 - 2026-04-10 기준: v2.0.0 Swift 6 migration을 준비하면서 모듈의 방향성이 **"thin C wrapper"**로 명확히 확정되었습니다. 상세 원칙은 아래 §0을, 구체적인 이행 계획은 `swift6-migration-plan.md`를 참조하세요.
 - 2026-04-11 기준: **v2.0.0이 릴리스되었습니다.** Package가 Swift 6.0 tools-version + `swiftLanguageModes: [.v6]`로 전환되었고, `StreamHandler` 시그니처는 `(isolated (any Actor)?, QuicConnection, QuicStream, QuicStreamOpenFlags) async -> Void`가 되었습니다. 나머지 공개 표면 변경(예: `NewConnectionInfo.accept(...)`, raw `HQUIC`/`UnsafeMutableRawPointer?` 제거, `SwiftMsQuicAPI`가 namespace enum으로 전환, `QuicObject`가 `public class` non-`open`으로 강등 등)은 §0.5에 상세히 정리되어 있습니다.
+- 2026-04-11 기준 (v2.0.0 직후): **Swift 모듈 이름이 `SwiftMsQuicHelper`에서 `SwiftMsQuic`으로 rename되었습니다.** 소비자는 `import SwiftMsQuicHelper`를 `import SwiftMsQuic`으로 바꿔야 합니다. Package.swift의 library product 이름(`SwiftMsQuic`/`SwiftMsQuicStatic`)은 그대로 유지됩니다 — 이제 product와 Swift module 이름이 일치합니다. 디렉토리도 `Sources/SwiftMsQuic/`로, DocC 번들도 `SwiftMsQuic.docc`로 함께 이동했습니다. 역사 문서(`swift6-migration-plan.md`)는 당시 기록이므로 과거 이름을 그대로 남겨 둡니다.
 
 </section>
 <section id="design-principles">
 
-# SwiftMsQuicHelper 설계 원칙
+# SwiftMsQuic 설계 원칙
 
-이 섹션은 `SwiftMsQuicHelper` 모듈의 API 및 Struct/Class 래퍼 설계 시 준수해야 할 원칙을 정의합니다.
+이 섹션은 `SwiftMsQuic` 모듈의 API 및 Struct/Class 래퍼 설계 시 준수해야 할 원칙을 정의합니다.
 **모든 에이전트는 이 원칙을 숙지하고, 코드 작성 시 반드시 따라야 합니다.**
 
 > 📖 상세한 구현 계획은 `WRAPPER_PLAN.md`를 참조하세요.
 
 ## 0. 모듈 스코프 (Module Scope)
 
-**`SwiftMsQuicHelper`는 MsQuic C 라이브러리의 *얇은 (thin)* Swift wrapper입니다. 고수준 네트워킹 추상화 라이브러리가 아닙니다.**
+**`SwiftMsQuic`은 MsQuic C 라이브러리의 *얇은 (thin)* Swift wrapper입니다. 고수준 네트워킹 추상화 라이브러리가 아닙니다.**
 
 이 원칙은 2026-04-10 v2.0.0 Swift 6 migration 협의에서 확정되었으며, 아래 모든 세부 원칙(§1 ~ §5)은 이 상위 원칙에 종속됩니다. 새로운 API를 추가하거나 기존 API를 변경할 때, 에이전트는 "이 변경이 thin wrapper의 범위 안에 있는가?"를 먼저 물어야 합니다.
 
@@ -40,7 +41,7 @@
 
 ### 0.2 이 모듈이 하지 않는 것 (What this module IS NOT)
 
-- **`actor`를 `SwiftMsQuicHelper` 내부에 도입하지 않습니다.** MsQuic 콜백은:
+- **`actor`를 `SwiftMsQuic` 내부에 도입하지 않습니다.** MsQuic 콜백은:
   1. **임의의 worker 스레드에서 동기적으로** 호출되고,
   2. 콜백 안에서 **즉시 `QuicStatus` 반환**을 요구하며 (특히 `ConnectionHandler`, `CertificateValidationHandler`, `EventHandler`),
   3. 반환값이 MsQuic 내부 상태 전이(accept/reject/pending 등)를 결정합니다.
@@ -65,7 +66,7 @@
 | `NewConnectionInfo.accept(configuration:streamHandler:) -> QuicConnection` 추가 | ✅ | raw `HQUIC` 노출을 제거하기 위한 표면 정리. MsQuic 의미론(연결 수락 시점에 configuration 적용) 보존. |
 | 모든 `QuicConnection`이 내부적으로 `NIOLockedValueBox`에 연결을 등록하고 `shutdown()` 호출 시 모두 정리 | ❌ | 전역 상태 관리. 사용자 레이어가 해야 할 일. |
 | `QuicConnectionEvent.peerStreamStarted(stream: HQUIC, ...)` → `(stream: QuicStream, ...)` | ✅ | raw 포인터 대신 Swift 래퍼로 변환하는 것은 §1.3에 따른 자연스러운 변환. MsQuic 의미론은 동일. |
-| `QuicClient` actor를 `SwiftMsQuicHelper`에 추가 | ❌ | §0.2 위반. `SwiftMsQuicExample`에는 참고용으로 두어도 되지만 모듈 public API가 되어서는 안 됨. |
+| `QuicClient` actor를 `SwiftMsQuic`에 추가 | ❌ | §0.2 위반. `SwiftMsQuicExample`에는 참고용으로 두어도 되지만 모듈 public API가 되어서는 안 됨. |
 | `EventHandler` 대신 `events: AsyncStream<QuicConnectionEvent>` 기반 API로 전환 | ❌ | MsQuic은 `EventHandler`의 반환값(`QuicStatus`)으로 이벤트 처리 결과를 결정함. AsyncStream은 반환값을 표현할 수 없음. 보조적으로 병설하는 것도 의미론 혼란을 유발하므로 하지 않음. |
 | `QuicStream.send(_:flags:)`의 fire-and-forget 오버로드 추가 | ✅ | MsQuic이 SEND_COMPLETE 이벤트를 통해 완료를 알려주므로, 사용자가 대기하지 않는 경우를 위한 편의 오버로드는 적절. 의미론 변경 없음. |
 
@@ -114,7 +115,7 @@
 - `QuicStream.InternalState`의 `receiveStream` 저장 위치, `QuicStream.deinit`/`QuicListener.deinit`의 continuation drain 누락, `QuicListener.start(...)`의 nil-coalescing 모호성, `QuicCertificate.swift`의 non-Darwin 가지 누락이 함께 수정되었습니다. 상세는 `swift6-migration-plan.md` Chunk 1 섹션을 참조하세요.
 
 **Example (`SwiftMsQuicExample`)**
-- `EchoServer`/`EchoClient` actor로 전면 재작성되었습니다. `@main struct App`은 얇은 진입점이며, 새 connection 등록 / 스트림 처리 / 데이터그램 수신은 actor-isolated 메서드로 분리되어 있습니다. 이 예제는 "사용자 측 actor 레이어가 `SwiftMsQuicHelper`를 어떻게 소비해야 하는지"에 대한 참고 구현이며, public API가 아닙니다.
+- `EchoServer`/`EchoClient` actor로 전면 재작성되었습니다. `@main struct App`은 얇은 진입점이며, 새 connection 등록 / 스트림 처리 / 데이터그램 수신은 actor-isolated 메서드로 분리되어 있습니다. 이 예제는 "사용자 측 actor 레이어가 `SwiftMsQuic`을 어떻게 소비해야 하는지"에 대한 참고 구현이며, public API가 아닙니다.
 
 ## 1. 핵심 설계 원칙 (Core Design Principles)
 
@@ -296,7 +297,7 @@ public struct QuicSettings {
 ## 5. 파일 구조 (File Structure)
 
 ```
-Sources/SwiftMsQuicHelper/
+Sources/SwiftMsQuic/
 ├── Core/
 │   ├── QuicObject.swift          # Base class
 │   ├── QuicError.swift           # 에러 enum

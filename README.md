@@ -33,7 +33,7 @@ dependencies: [
 ]
 ```
 
-Then add `SwiftMsQuicHelper` to your target dependencies:
+Then add `SwiftMsQuic` to your target dependencies:
 
 ```swift
 targets: [
@@ -53,7 +53,7 @@ targets: [
 You must initialize the MsQuic API before using it.
 
 ```swift
-import SwiftMsQuicHelper
+import SwiftMsQuic
 
 // Initialize
 try SwiftMsQuicAPI.open().throwIfFailed()
@@ -187,6 +187,25 @@ v2.0.0 adopts Swift 6 strict concurrency and removes most of the raw C
 types from the public API. The migration is mechanical — the following
 are the breaking changes you will almost certainly have to touch:
 
+### The Swift module is now `SwiftMsQuic`
+
+The Swift target was renamed from `SwiftMsQuicHelper` to
+`SwiftMsQuic`. The Swift Package Manager library products
+(`SwiftMsQuic` / `SwiftMsQuicStatic`) keep their names — now the
+product name and the importable module name line up.
+
+```swift
+// v1.x
+import SwiftMsQuicHelper
+
+// v2.0
+import SwiftMsQuic
+```
+
+Your `Package.swift` dependency entry does not need to change: the
+product was already called `SwiftMsQuic` in 1.x, so
+`.product(name: "SwiftMsQuic", package: "swift-msquic")` keeps working.
+
 ### Accepting server-side connections
 
 ```swift
@@ -254,17 +273,18 @@ your own higher-level actors on top of `QuicListener` /
 ### Upgrade checklist
 
 1. Bump your dependency: `from: "2.0.0"`.
-2. Replace `QuicConnection(handle: info.connection, configuration:)` with `info.accept(configuration:)`.
-3. Add a leading `_ isolation` parameter to every `StreamHandler` closure.
-4. Adjust pattern matches on `.peerStreamStarted` to take a `QuicStream`.
-5. Drop any reference to the `context` field on `.datagramSendStateChanged` / `.sendComplete`.
-6. Remove references to `SwiftMsQuicAPI.shared`.
-7. Bump your Swift tools-version to 6.0, or keep Swift 5 mode and use a Swift 6.0+ toolchain.
+2. Replace every `import SwiftMsQuicHelper` with `import SwiftMsQuic`.
+3. Replace `QuicConnection(handle: info.connection, configuration:)` with `info.accept(configuration:)`.
+4. Add a leading `_ isolation` parameter to every `StreamHandler` closure.
+5. Adjust pattern matches on `.peerStreamStarted` to take a `QuicStream`.
+6. Drop any reference to the `context` field on `.datagramSendStateChanged` / `.sendComplete`.
+7. Remove references to `SwiftMsQuicAPI.shared`.
+8. Bump your Swift tools-version to 6.0, or keep Swift 5 mode and use a Swift 6.0+ toolchain.
 
 ## Important Notes
 
 - **MsQuic Version**: The included binary is based on **MsQuic v2.5.6**.
-- **Use SwiftMsQuicHelper**: It is strongly recommended to use the `SwiftMsQuicHelper` module instead of importing `MsQuic` directly. Swift's C Interop does not fully support C macros, making it impossible to access MsQuic status codes (which are macros) directly. `SwiftMsQuicHelper` provides proper Swift wrappers (e.g., `QuicStatus`) to handle this.
+- **Use SwiftMsQuic**: It is strongly recommended to use the `SwiftMsQuic` module instead of importing `MsQuic` directly. Swift's C Interop does not fully support C macros, making it impossible to access MsQuic status codes (which are macros) directly. `SwiftMsQuic` provides proper Swift wrappers (e.g., `QuicStatus`) to handle this.
 - **Modifications**: This repository uses a fork of MsQuic maintained by **Team Unstablers Inc.** with the following change:
     - Removed `dlopen(3)` calls in `quic_bugcheck` to ensure compliance with iOS App Store review guidelines.
 
