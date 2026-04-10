@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftMsQuicHelper
+import SwiftMsQuic
 import os
 
 // MARK: - Error helpers
@@ -39,7 +39,7 @@ enum EchoExampleError: Error, CustomStringConvertible {
 
 // MARK: - EchoServer
 
-/// A minimal QUIC echo server built on top of `SwiftMsQuicHelper`.
+/// A minimal QUIC echo server built on top of `SwiftMsQuic`.
 ///
 /// This example is intentionally small: it demonstrates how to host a
 /// connection registry inside an actor and how to bridge MsQuic's

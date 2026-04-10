@@ -17,7 +17,7 @@ import os
 /// - Note: This class is typically not used directly. Use the concrete subclasses
 ///   like ``QuicConnection``, ``QuicStream``, or ``QuicListener`` instead.
 ///   External subclassing is intentionally disallowed — the class is `public`
-///   but not `open`, so only subclasses declared inside `SwiftMsQuicHelper`
+///   but not `open`, so only subclasses declared inside `SwiftMsQuic`
 ///   itself are permitted.
 ///
 /// `QuicObject` is marked `@unchecked Sendable` so that subclasses which are

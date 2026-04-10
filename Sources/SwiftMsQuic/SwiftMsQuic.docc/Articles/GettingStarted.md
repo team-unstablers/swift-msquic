@@ -1,6 +1,6 @@
 # Getting Started
 
-Learn how to set up and use SwiftMsQuicHelper for QUIC protocol communication.
+Learn how to set up and use SwiftMsQuic for QUIC protocol communication.
 
 ## Overview
 
@@ -8,10 +8,10 @@ This guide walks you through initializing MsQuic, creating a client connection, 
 
 ## Initialize MsQuic
 
-Before using any SwiftMsQuicHelper APIs, you must initialize the MsQuic library:
+Before using any SwiftMsQuic APIs, you must initialize the MsQuic library:
 
 ```swift
-import SwiftMsQuicHelper
+import SwiftMsQuic
 
 // Open the MsQuic library
 try SwiftMsQuicAPI.open().throwIfFailed()

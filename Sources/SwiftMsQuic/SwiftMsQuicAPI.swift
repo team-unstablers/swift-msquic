@@ -12,7 +12,7 @@ import os
 
 /// The main entry point for initializing and accessing the MsQuic library.
 ///
-/// Before using any SwiftMsQuicHelper APIs, you must call ``open()`` to initialize
+/// Before using any SwiftMsQuic APIs, you must call ``open()`` to initialize
 /// the MsQuic library. When finished, call ``close()`` to release resources.
 ///
 /// ## Example
@@ -22,7 +22,7 @@ import os
 /// try SwiftMsQuicAPI.open().throwIfFailed()
 /// defer { SwiftMsQuicAPI.close() }
 ///
-/// // Use SwiftMsQuicHelper APIs...
+/// // Use SwiftMsQuic APIs...
 /// ```
 ///
 /// ## Topics
@@ -46,7 +46,7 @@ public enum SwiftMsQuicAPI {
 
     /// The raw MsQuic API table.
     ///
-    /// This provides direct access to the underlying MsQuic C API. SwiftMsQuicHelper
+    /// This provides direct access to the underlying MsQuic C API. SwiftMsQuic
     /// internals use this through per-object `api` accessors; it is not part of the
     /// public API surface.
     ///
@@ -67,7 +67,7 @@ public enum SwiftMsQuicAPI {
     /// Opens and initializes the MsQuic library.
     ///
     /// Call this method once at application startup before using any other
-    /// SwiftMsQuicHelper APIs. Check the returned status to ensure initialization succeeded.
+    /// SwiftMsQuic APIs. Check the returned status to ensure initialization succeeded.
     ///
     /// ```swift
     /// try SwiftMsQuicAPI.open().throwIfFailed()
