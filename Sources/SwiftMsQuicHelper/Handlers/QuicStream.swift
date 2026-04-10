@@ -16,7 +16,8 @@ import os
 ///
 /// ## Sending Data
 ///
-/// Use ``send(_:flags:)`` to send data on the stream:
+/// Use ``send(_:flags:)-9hicu`` (async) or ``send(_:flags:)-9anpg``
+/// (fire-and-forget) to send data on the stream:
 ///
 /// ```swift
 /// let stream = try connection.openStream()
@@ -46,12 +47,13 @@ import os
 /// ### Managing Stream Lifecycle
 ///
 /// - ``start(flags:)``
-/// - ``shutdown(errorCode:)``
+/// - ``shutdown(flags:errorCode:)``
 /// - ``state``
 ///
 /// ### Data Transfer
 ///
-/// - ``send(_:flags:)``
+/// - ``send(_:flags:)-9hicu``
+/// - ``send(_:flags:)-9anpg``
 /// - ``receive``
 /// - ``setPriority(_:)``
 /// - ``getPriority()``
@@ -274,9 +276,11 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
 
     /// Sends data on the stream without waiting for completion.
     ///
-    /// Unlike ``send(_:flags:)-async``, this method returns immediately after queuing the data
-    /// to MsQuic. The buffer is automatically freed when MsQuic fires the send-complete callback.
-    /// MsQuic guarantees FIFO ordering, so multiple calls to this method will be sent in order.
+    /// Unlike the async overload (``send(_:flags:)-9hicu``), this method
+    /// returns immediately after queuing the data to MsQuic. The buffer is
+    /// automatically freed when MsQuic fires the send-complete callback.
+    /// MsQuic guarantees FIFO ordering, so multiple calls to this method
+    /// will be sent in order.
     ///
     /// - Parameters:
     ///   - data: The data to send.

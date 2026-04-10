@@ -38,9 +38,9 @@ public enum QuicStreamEvent: Sendable {
     ///
     /// Note: the per-send client context that MsQuic carries on this event is
     /// intentionally not surfaced. ``QuicStream`` uses the raw context to
-    /// drive ``QuicStream/send(_:flags:)`` continuations internally; consumers
-    /// that just want to observe send completions should rely on the
-    /// `canceled` flag alone.
+    /// drive its async send continuations (``QuicStream/send(_:flags:)-9hicu``)
+    /// internally; consumers that just want to observe send completions should
+    /// rely on the `canceled` flag alone.
     ///
     /// - Parameter canceled: Whether the send was canceled.
     case sendComplete(canceled: Bool)

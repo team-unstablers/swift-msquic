@@ -409,7 +409,11 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
             )
 
             if status.failed {
-                let sendContext: DatagramSendContext? = internalState.withLock { state in
+                // `withLockUnchecked`: `DatagramSendContext` intentionally
+                // is not Sendable (it carries raw buffers and a C-side
+                // pointer), but it never escapes the lock scope beyond
+                // this local variable.
+                let sendContext: DatagramSendContext? = internalState.withLockUnchecked { state in
                     guard state.datagramSendContexts.remove(contextToken) != nil else {
                         return nil
                     }
@@ -734,7 +738,10 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
                 // still be delivered, so we keep the context registered and
                 // only drop it on a terminal state.
                 if swiftState != .lostSuspect {
-                    let sendContext: DatagramSendContext? = internalState.withLock { state in
+                    // `withLockUnchecked`: see note on the other send-path
+                    // usage above. `DatagramSendContext` is deliberately
+                    // non-Sendable but is consumed locally.
+                    let sendContext: DatagramSendContext? = internalState.withLockUnchecked { state in
                         guard state.datagramSendContexts.remove(contextToken) != nil else {
                             return nil
                         }

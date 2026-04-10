@@ -112,11 +112,10 @@ let listener = try QuicListener(registration: registration)
 listener.onNewConnection { listener, info in
     print("New connection from \(info.remoteAddress)")
 
-    let connection = try QuicConnection(
-        handle: info.connection,
-        configuration: configuration
-    ) { conn, stream, flags in
-        // Handle incoming streams
+    // Accept the connection and attach a stream handler. The leading
+    // `_` in the closure discards the `isolated (any Actor)?` parameter
+    // — use a named parameter if you need to hop into a specific actor.
+    let connection = try info.accept(configuration: configuration) { _, conn, stream, flags in
         do {
             for try await data in stream.receive {
                 print("Received: \(String(data: data, encoding: .utf8) ?? "?")")
