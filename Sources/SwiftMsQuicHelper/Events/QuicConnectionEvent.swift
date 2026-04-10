@@ -42,7 +42,7 @@ public enum QuicDatagramSendState: Sendable {
 ///
 /// These events are delivered through ``QuicConnection/onEvent(_:)`` for low-level
 /// event handling. Most common events are also handled by the high-level API.
-public enum QuicConnectionEvent {
+public enum QuicConnectionEvent: Sendable {
     /// The connection has been established.
     ///
     /// - Parameters:
@@ -79,9 +79,9 @@ public enum QuicConnectionEvent {
     /// The peer has started a new stream.
     ///
     /// - Parameters:
-    ///   - stream: The raw stream handle.
+    ///   - stream: The newly created ``QuicStream`` wrapping the peer-initiated stream.
     ///   - flags: Flags indicating stream properties.
-    case peerStreamStarted(stream: HQUIC, flags: QuicStreamOpenFlags)
+    case peerStreamStarted(stream: QuicStream, flags: QuicStreamOpenFlags)
 
     /// Additional streams are now available.
     ///
@@ -105,7 +105,13 @@ public enum QuicConnectionEvent {
     case datagramReceived(buffer: QuicBuffer, flags: QuicReceiveFlags)
 
     /// The state of a datagram send has changed.
-    case datagramSendStateChanged(state: QuicDatagramSendState, context: UnsafeMutableRawPointer?)
+    ///
+    /// Note: the per-send client context that MsQuic carries on this event is
+    /// intentionally not surfaced. ``QuicConnection`` uses the raw context to
+    /// drive ``QuicConnection/sendDatagram(_:flags:)`` continuations internally;
+    /// consumers that just want to observe state transitions should rely on
+    /// the `state` payload alone.
+    case datagramSendStateChanged(state: QuicDatagramSendState)
 
     /// The connection was resumed from a previous session.
     case resumed(resumptionState: Data?)

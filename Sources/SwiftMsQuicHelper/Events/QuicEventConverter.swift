@@ -30,7 +30,7 @@ internal enum QuicEventConverter {
             let remoteAddress = QuicAddress(info.RemoteAddress.pointee)
             
             return .newConnection(info: .init(
-                connection: event.NEW_CONNECTION.Connection,
+                rawConnectionHandle: event.NEW_CONNECTION.Connection,
                 serverName: serverName,
                 negotiatedAlpn: negotiatedAlpn,
                 localAddress: localAddress,
@@ -78,7 +78,15 @@ internal enum QuicEventConverter {
             
         case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED:
             let started = event.PEER_STREAM_STARTED
-            return .peerStreamStarted(stream: started.Stream, flags: QuicStreamOpenFlags(rawValue: UInt32(started.Flags.rawValue)))
+            // Wrap the raw handle immediately so that the public event surface
+            // never exposes `HQUIC`. The wrapper installs our stream callback
+            // via `SetCallbackHandler` and begins managing the handle's
+            // lifetime from this point on.
+            let stream = QuicStream(handle: started.Stream)
+            return .peerStreamStarted(
+                stream: stream,
+                flags: QuicStreamOpenFlags(rawValue: UInt32(started.Flags.rawValue))
+            )
             
         case QUIC_CONNECTION_EVENT_STREAMS_AVAILABLE:
             let available = event.STREAMS_AVAILABLE
@@ -101,8 +109,12 @@ internal enum QuicEventConverter {
             return .datagramReceived(buffer: QuicBuffer(data), flags: QuicReceiveFlags(rawValue: UInt32(recv.Flags.rawValue)))
             
         case QUIC_CONNECTION_EVENT_DATAGRAM_SEND_STATE_CHANGED:
+            // `ClientContext` is intentionally dropped from the public-facing
+            // enum. `QuicConnection.handleEvent` inspects the raw event
+            // directly to resume its outstanding datagram send continuations
+            // before this converter is invoked for user observation.
             let state = event.DATAGRAM_SEND_STATE_CHANGED
-            return .datagramSendStateChanged(state: QuicDatagramSendState(state.State), context: state.ClientContext)
+            return .datagramSendStateChanged(state: QuicDatagramSendState(state.State))
             
         case QUIC_CONNECTION_EVENT_RESUMED:
             let resumed = event.RESUMED
@@ -181,8 +193,12 @@ internal enum QuicEventConverter {
             )
             
         case QUIC_STREAM_EVENT_SEND_COMPLETE:
+            // `ClientContext` is intentionally dropped from the public-facing
+            // enum. `QuicStream.handleEvent` inspects the raw event directly
+            // to resume its outstanding send continuations before this
+            // converter is invoked for user observation.
             let send = event.SEND_COMPLETE
-            return .sendComplete(canceled: send.Canceled != 0, context: send.ClientContext)
+            return .sendComplete(canceled: send.Canceled != 0)
             
         case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
             return .peerSendShutdown

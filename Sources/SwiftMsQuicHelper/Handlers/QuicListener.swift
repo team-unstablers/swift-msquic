@@ -22,10 +22,7 @@ import os
 /// listener.onNewConnection { listener, info in
 ///     print("New connection from \(info.remoteAddress)")
 ///
-///     let connection = try QuicConnection(
-///         handle: info.connection,
-///         configuration: configuration
-///     ) { conn, stream, flags in
+///     let connection = try info.accept(configuration: configuration) { conn, stream, flags in
 ///         // Handle incoming streams
 ///     }
 ///

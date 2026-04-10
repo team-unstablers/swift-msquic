@@ -29,14 +29,13 @@ import os
 ///
 /// ## Handling Server-Side Connections
 ///
-/// When accepting connections from a ``QuicListener``, use the handle-based initializer:
+/// When accepting connections from a ``QuicListener``, call
+/// ``QuicListenerEvent/NewConnectionInfo/accept(configuration:streamHandler:)``
+/// from inside the listener callback:
 ///
 /// ```swift
 /// listener.onNewConnection { listener, info in
-///     let connection = try QuicConnection(
-///         handle: info.connection,
-///         configuration: configuration
-///     ) { conn, stream, flags in
+///     let connection = try info.accept(configuration: configuration) { conn, stream, flags in
 ///         // Handle incoming streams
 ///     }
 ///     return connection
@@ -700,8 +699,48 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
     }
     
     internal func handleEvent(_ event: QUIC_CONNECTION_EVENT) -> QuicStatus {
+        // Datagram send-state completion is dispatched directly from the raw
+        // event so that we can read `ClientContext` before it is dropped by
+        // the converter. This also keeps the public `QuicConnectionEvent`
+        // free of raw pointers.
+        if event.Type == QUIC_CONNECTION_EVENT_DATAGRAM_SEND_STATE_CHANGED {
+            let rawState = event.DATAGRAM_SEND_STATE_CHANGED
+            if let rawContext = rawState.ClientContext {
+                let contextToken = UInt(bitPattern: rawContext)
+                let swiftState = QuicDatagramSendState(rawState.State)
+
+                let finalize: (CheckedContinuation<Void, Error>) -> Void
+                switch swiftState {
+                case .sent, .lostDiscarded, .acknowledged, .acknowledgedSpurious:
+                    finalize = { $0.resume() }
+                case .canceled, .unknown:
+                    finalize = { $0.resume(throwing: QuicError.aborted) }
+                case .lostSuspect:
+                    finalize = { _ in }
+                }
+
+                // `.lostSuspect` is an interim notification: the datagram may
+                // still be delivered, so we keep the context registered and
+                // only drop it on a terminal state.
+                if swiftState != .lostSuspect {
+                    let sendContext: DatagramSendContext? = internalState.withLock { state in
+                        guard state.datagramSendContexts.remove(contextToken) != nil else {
+                            return nil
+                        }
+                        guard let rawPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
+                            return nil
+                        }
+                        return Unmanaged<DatagramSendContext>.fromOpaque(rawPtr).takeRetainedValue()
+                    }
+                    if let sendContext {
+                        finalize(sendContext.continuation)
+                    }
+                }
+            }
+        }
+
         let swiftEvent = QuicEventConverter.convert(event)
-        
+
         let eventHandler = internalState.withLock { $0.eventHandler }
         if let handler = eventHandler {
             let status = handler(self, swiftEvent)
@@ -709,7 +748,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
                 return status
             }
         }
-        
+
         switch swiftEvent {
         case .connected:
             let continuation = internalState.withLock { state -> CheckedContinuation<Void, Error>? in
@@ -770,45 +809,15 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
             }
             connectContinuation?.resume(throwing: QuicError.aborted)
 
-        case .datagramSendStateChanged(let state, let context):
-            guard let context else {
-                break
-            }
-            let contextToken = UInt(bitPattern: context)
+        case .datagramSendStateChanged:
+            // Already dispatched at the top of `handleEvent` from the raw
+            // event so that the continuation could be resumed without needing
+            // to carry a raw `UnsafeMutableRawPointer?` on the public enum.
+            break
 
-            switch state {
-            case .sent, .lostDiscarded, .acknowledged, .acknowledgedSpurious:
-                let sendContext: DatagramSendContext? = internalState.withLock { state in
-                    guard state.datagramSendContexts.remove(contextToken) != nil else {
-                        return nil
-                    }
-                    guard let rawPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
-                        return nil
-                    }
-                    return Unmanaged<DatagramSendContext>.fromOpaque(rawPtr).takeRetainedValue()
-                }
-                sendContext?.continuation.resume()
-
-            case .canceled, .unknown:
-                let sendContext: DatagramSendContext? = internalState.withLock { state in
-                    guard state.datagramSendContexts.remove(contextToken) != nil else {
-                        return nil
-                    }
-                    guard let rawPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
-                        return nil
-                    }
-                    return Unmanaged<DatagramSendContext>.fromOpaque(rawPtr).takeRetainedValue()
-                }
-                sendContext?.continuation.resume(throwing: QuicError.aborted)
-
-            case .lostSuspect:
-                break
-            }
-            
-        case .peerStreamStarted(let streamHandle, let flags):
+        case .peerStreamStarted(let stream, let flags):
             let handler = internalState.withLock { $0.peerStreamHandler }
             if let handler {
-                let stream = QuicStream(handle: streamHandle)
                 Task {
                     await handler(self, stream, flags)
                 }

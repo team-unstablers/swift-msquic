@@ -144,8 +144,8 @@ struct App {
         
         listener.onNewConnection { listener, info in
             print("[Server] New connection from \(info.remoteAddress)")
-            
-            let connection = try QuicConnection(handle: info.connection, configuration: config) { conn, stream, flags in
+
+            let connection = try info.accept(configuration: config) { conn, stream, flags in
                 let direction = flags.contains(.unidirectional) ? "unidirectional" : "bidirectional"
                 print("[Server] Stream started (\(direction))")
                 do {
@@ -242,7 +242,7 @@ struct App {
                 print("[Client] Datagram received: \(msg)")
                 datagramContinuation.yield(data)
 
-            case .datagramSendStateChanged(let state, _):
+            case .datagramSendStateChanged(let state):
                 print("[Client] Datagram send state: \(state)")
 
             default:

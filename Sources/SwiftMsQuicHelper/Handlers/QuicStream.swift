@@ -401,8 +401,25 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
     }
    
     internal func handleEvent(_ event: QUIC_STREAM_EVENT) -> QuicStatus {
+        // Send completion is dispatched directly from the raw event so we can
+        // read `ClientContext` before it is dropped by the converter. This
+        // keeps the public `QuicStreamEvent` free of raw pointers.
+        if event.Type == QUIC_STREAM_EVENT_SEND_COMPLETE {
+            let rawSend = event.SEND_COMPLETE
+            if let rawContext = rawSend.ClientContext {
+                let sendContext = Unmanaged<SendContext>.fromOpaque(rawContext).takeRetainedValue()
+                if let continuation = sendContext.continuation {
+                    if rawSend.Canceled != 0 {
+                        continuation.resume(throwing: QuicError.aborted)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        }
+
         let swiftEvent = QuicEventConverter.convert(event)
-        
+
         switch swiftEvent {
         case .startComplete(let status, _, _):
             let continuation = internalState.withLock { state -> CheckedContinuation<Void, Error>? in
@@ -418,25 +435,19 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
             } else {
                 continuation?.resume()
             }
-            
+
         case .receive(let data, _, _, let totalLength):
             internalState.withLock { $0.receiveContinuation }?.yield(data)
             if let handle = handle {
                 api.StreamReceiveComplete(handle, totalLength)
                 return .pending
             }
-            
-        case .sendComplete(let canceled, let context):
-            if let context = context {
-                let sendContext = Unmanaged<SendContext>.fromOpaque(context).takeRetainedValue()
-                if let continuation = sendContext.continuation {
-                    if canceled {
-                        continuation.resume(throwing: QuicError.aborted)
-                    } else {
-                        continuation.resume()
-                    }
-                }
-            }
+
+        case .sendComplete:
+            // Already dispatched at the top of `handleEvent` from the raw
+            // event so that the continuation could be resumed without
+            // carrying an `UnsafeMutableRawPointer?` on the public enum.
+            break
             
         case .peerSendShutdown:
             internalState.withLock { $0.receiveContinuation }?.finish()
