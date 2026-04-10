@@ -6,6 +6,7 @@
 //
 
 import MsQuic
+import os
 
 
 
@@ -30,27 +31,36 @@ import MsQuic
 ///
 /// - ``open()``
 /// - ``close()``
-///
-/// ### Internal Access
-///
-/// - ``MsQuic``
-public struct SwiftMsQuicAPI {
-    /// Shared instance (for compatibility).
-    public static let shared = Self()
-    private static var _MsQuic: UnsafeRawPointer? = nil
+public enum SwiftMsQuicAPI {
+    /// Lock-protected global state for the raw MsQuic API table pointer.
+    ///
+    /// `state` lock protects all mutable fields below. The raw pointer is
+    /// written once by ``open()`` and cleared by ``close()``; readers acquire
+    /// the lock to fetch the current value. The struct is `@unchecked
+    /// Sendable` because `UnsafeRawPointer?` is not Sendable by default, yet
+    /// all access is serialized through the lock.
+    private struct ApiState: @unchecked Sendable {
+        var rawAPI: UnsafeRawPointer?
+    }
+    private static let state = OSAllocatedUnfairLock(initialState: ApiState())
 
     /// The raw MsQuic API table.
     ///
-    /// This provides direct access to the underlying MsQuic C API. Most users
-    /// should use the high-level Swift wrappers instead.
+    /// This provides direct access to the underlying MsQuic C API. SwiftMsQuicHelper
+    /// internals use this through per-object `api` accessors; it is not part of the
+    /// public API surface.
     ///
     /// - Important: ``open()`` must be called before accessing this property.
-    public static var MsQuic: QUIC_API_TABLE {
-        guard let msQuic = _MsQuic else {
+    internal static var MsQuic: QUIC_API_TABLE {
+        // `withLockUnchecked` is used because the return type
+        // (`UnsafeRawPointer?`) is not Sendable. Serialization is still
+        // enforced by the underlying unfair lock.
+        let rawAPI = state.withLockUnchecked { $0.rawAPI }
+        guard let rawAPI else {
             fatalError("MsQuic not initialized! call SwiftMsQuicAPI.open() first")
         }
 
-        let apiTable = msQuic.bindMemory(to: QUIC_API_TABLE.self, capacity: 1)
+        let apiTable = rawAPI.bindMemory(to: QUIC_API_TABLE.self, capacity: 1)
         return apiTable.pointee
     }
 
@@ -65,7 +75,9 @@ public struct SwiftMsQuicAPI {
     ///
     /// - Returns: A status indicating whether initialization succeeded.
     public static func open() -> QuicStatus {
-        return QuicStatus(MsQuicOpenVersion(UInt32(QUIC_API_VERSION_2), &_MsQuic))
+        state.withLock { state in
+            QuicStatus(MsQuicOpenVersion(UInt32(QUIC_API_VERSION_2), &state.rawAPI))
+        }
     }
 
     /// Closes and releases the MsQuic library.
@@ -75,10 +87,9 @@ public struct SwiftMsQuicAPI {
     ///
     /// - Important: All QUIC objects must be released before calling this method.
     public static func close() {
-        MsQuicClose(_MsQuic)
+        state.withLock { state in
+            MsQuicClose(state.rawAPI)
+            state.rawAPI = nil
+        }
     }
 }
-
-
-
-

@@ -17,7 +17,7 @@ import MsQuic
 /// - Use ``maxThroughput`` for applications that need to move large amounts of data.
 /// - Use ``scavenger`` for background transfers that shouldn't interfere with other traffic.
 /// - Use ``realTime`` for time-sensitive applications like audio/video streaming.
-public enum QuicExecutionProfile {
+public enum QuicExecutionProfile: Sendable {
     /// Optimized for low latency and fast response times.
     ///
     /// Best for interactive applications like chat, gaming, or API calls.
@@ -40,7 +40,7 @@ public enum QuicExecutionProfile {
     case realTime
 }
 
-public extension QuicExecutionProfile {
+internal extension QuicExecutionProfile {
     var asLibEnum: QUIC_EXECUTION_PROFILE {
         switch self {
         case .lowLatency:

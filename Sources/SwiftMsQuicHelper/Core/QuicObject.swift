@@ -16,9 +16,20 @@ import os
 ///
 /// - Note: This class is typically not used directly. Use the concrete subclasses
 ///   like ``QuicConnection``, ``QuicStream``, or ``QuicListener`` instead.
-open class QuicObject: CInteropHandle {
-    /// Internal MsQuic Handle
-    internal var handle: HQUIC?
+///   External subclassing is intentionally disallowed — the class is `public`
+///   but not `open`, so only subclasses declared inside `SwiftMsQuicHelper`
+///   itself are permitted.
+public class QuicObject: CInteropHandle {
+    /// Internal MsQuic Handle.
+    ///
+    /// Marked `nonisolated(unsafe)` because writes are confined to `init`
+    /// (or to the `init`-like path in subclasses that assign after calling
+    /// `super.init()`), while reads happen from both the owning Swift task
+    /// and arbitrary MsQuic worker threads inside C callbacks. The handle
+    /// is an opaque pointer whose identity never changes after
+    /// initialization, so concurrent reads are safe without additional
+    /// synchronization.
+    internal nonisolated(unsafe) var handle: HQUIC?
 
     /// Convenience accessor for the API table
     internal var api: QUIC_API_TABLE { SwiftMsQuicAPI.MsQuic }

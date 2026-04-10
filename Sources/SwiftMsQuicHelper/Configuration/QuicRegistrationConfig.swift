@@ -13,7 +13,7 @@ import MsQuic
 ///
 /// This structure holds the parameters needed to create a registration,
 /// including the application name and execution profile.
-public struct QuicRegistrationConfig {
+public struct QuicRegistrationConfig: Sendable {
     /// A human-readable name for the application.
     ///
     /// This name is used for logging and debugging purposes.

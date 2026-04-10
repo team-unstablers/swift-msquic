@@ -34,7 +34,11 @@ import MsQuic
 /// ### Managing Registration Lifecycle
 ///
 /// - ``shutdown(silent:errorCode:)``
-public final class QuicRegistration: QuicObject {
+///
+/// - Note: `QuicRegistration` is `@unchecked Sendable`. The underlying MsQuic
+///   handle is write-once in `init` and closed in `deinit`; there is no
+///   mutable state after initialization, so sharing across tasks is safe.
+public final class QuicRegistration: QuicObject, @unchecked Sendable {
 
     /// Creates a new registration with the specified configuration.
     ///

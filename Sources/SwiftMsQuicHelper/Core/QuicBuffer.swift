@@ -12,7 +12,7 @@ import MsQuic
 ///
 /// `QuicBuffer` wraps Swift `Data` and provides a safe way to pass buffers
 /// to the underlying MsQuic C API.
-public struct QuicBuffer {
+public struct QuicBuffer: Sendable {
     /// The underlying data.
     public let data: Data
 
