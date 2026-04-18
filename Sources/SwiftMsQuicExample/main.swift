@@ -7,12 +7,12 @@
 
 import Foundation
 import SwiftMsQuicHelper
-import os
+import Synchronization
 
 @main
 struct App {
     // Keep server-side connections alive until shutdown
-    static let connectionLock = OSAllocatedUnfairLock(initialState: [ObjectIdentifier: QuicConnection]())
+    static let connectionLock = Mutex([ObjectIdentifier: QuicConnection]())
 
     static func failAndExit(_ message: String, error: Error? = nil) -> Never {
         if let error {
@@ -227,7 +227,7 @@ struct App {
         try config.loadCredential(.init(type: .none, flags: [.client, .noCertificateValidation]))
         
         let connection = try QuicConnection(registration: reg)
-        let datagramSendEnabledLock = OSAllocatedUnfairLock(initialState: false)
+        let datagramSendEnabledLock = Mutex(false)
         let (datagramStream, datagramContinuation) = AsyncStream<Data>.makeStream()
 
         connection.onEvent { _, event in

@@ -7,7 +7,7 @@
 
 import Foundation
 import MsQuic
-import os
+import Synchronization
 
 /// A QUIC connection that manages communication with a remote peer.
 ///
@@ -122,7 +122,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
         case startShutdown
     }
     
-    private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
+    private let internalState = Mutex(InternalState())
     
     /// The current state of the connection.
     public var state: State {

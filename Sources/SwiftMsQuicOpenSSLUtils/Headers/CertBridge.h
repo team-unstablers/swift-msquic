@@ -5,30 +5,46 @@
 //  Created by Gyuhwan Park on 2/4/26.
 //
 
-#import <Foundation/Foundation.h>
-#import <Security/Security.h>
+#ifndef CERT_BRIDGE_H
+#define CERT_BRIDGE_H
 
-/// A bridge class for converting OpenSSL X509 structures to SecCertificateRef objects.
-@interface CertBridge: NSObject
+#include <stdint.h>
+#include <stddef.h>
 
-/// Constructs SecCertificateRef from OpenSSL X509 pointer.
-/// @param x509 Pointer to OpenSSL X509 structure.
-/// @param error Pointer to NSError object to capture any error that occurs during the conversion.
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/// Result of a single DER certificate extraction.
+typedef struct {
+    uint8_t *data;    ///< DER-encoded certificate bytes (caller must free with CertBridge_Free)
+    int length;       ///< Length in bytes, or negative on error
+} CertBridge_DERCert;
+
+/// Result of extracting a certificate chain.
+typedef struct {
+    CertBridge_DERCert *certs;  ///< Array of DER certs (caller must free each .data, then free the array)
+    int count;                   ///< Number of certificates in the chain
+} CertBridge_DERChain;
+
+/// Extracts DER-encoded bytes from an OpenSSL X509 pointer.
 ///
-/// @return A SecCertificateRef object representing the certificate, or nil if an error occurred.
-+ (SecCertificateRef) copySecCertificateFromOpenSSLX509: (const void *) x509 error: (NSError **) error;
+/// @param x509 Pointer to an OpenSSL X509 structure.
+/// @return A DERCert with the encoded data. On error, data is NULL and length is negative.
+CertBridge_DERCert CertBridge_CopyDERFromX509(const void *x509);
 
-/// Constructs an array of SecCertificateRef from OpenSSL STACK_OF(X509).
-/// @param stackX509 Pointer to OpenSSL STACK_OF(X509) structure.
-/// @param error Pointer to NSError object to capture any error that occurs during the conversion.
+/// Extracts DER-encoded certificate chain from an OpenSSL X509_STORE_CTX.
+/// Skips the leaf certificate (index 0) — returns only the chain certs.
 ///
-/// @return A CFArrayRef containing SecCertificateRef objects, or nil if an error occurred.
-+ (CFArrayRef) copySecCertificateArrayFromOpenSSLStackX509: (const void *) stackX509 error: (NSError **) error;
+/// @param storeContext Pointer to an OpenSSL X509_STORE_CTX structure.
+/// @return A DERChain with the extracted certificates. Empty chain on NULL input.
+CertBridge_DERChain CertBridge_CopyDERChainFromStoreContext(const void *storeContext);
 
-/// Constructs an array of SecCertificateRef from OpenSSL X509_STORE_CTX.
-/// @param storeContext Pointer to OpenSSL X509_STORE_CTX structure.
-/// @param error Pointer to NSError object to capture any error that occurs during the conversion.
-///
-/// @return A CFArrayRef containing SecCertificateRef objects, or nil if an error occurred.
-+ (CFArrayRef) copySecCertificateArrayFromOpenSSLStoreContext: (const void *) storeContext error: (NSError **) error;
-@end
+/// Frees memory allocated by CertBridge functions.
+void CertBridge_Free(void *ptr);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* CERT_BRIDGE_H */

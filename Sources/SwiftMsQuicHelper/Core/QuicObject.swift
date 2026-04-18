@@ -7,7 +7,7 @@
 
 import Foundation
 import MsQuic
-import os
+import Synchronization
 
 /// Base class for all QUIC handle wrappers.
 ///
@@ -26,7 +26,7 @@ open class QuicObject: CInteropHandle {
     private struct RetainState: @unchecked Sendable {
         var retainedSelf: Unmanaged<AnyObject>?
     }
-    private let retainState = OSAllocatedUnfairLock(initialState: RetainState())
+    private let retainState = Mutex(RetainState())
 
     /// Whether this object has a valid handle.
     public var isValid: Bool { handle != nil }

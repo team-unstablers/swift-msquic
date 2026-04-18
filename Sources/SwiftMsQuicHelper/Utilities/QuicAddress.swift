@@ -118,10 +118,8 @@ public struct QuicAddress: CustomStringConvertible, Sendable {
         switch family {
         case .ipv4:
             return UInt16(bigEndian: raw.Ipv4.sin_port)
-        case .ipv6:
+        case .ipv6, .unspecified:
             return UInt16(bigEndian: raw.Ipv6.sin6_port)
-        default:
-            return 0
         }
     }
 

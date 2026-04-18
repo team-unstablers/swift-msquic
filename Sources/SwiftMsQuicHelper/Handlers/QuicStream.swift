@@ -7,7 +7,7 @@
 
 import Foundation
 import MsQuic
-import os
+import Synchronization
 
 /// A QUIC stream for bidirectional or unidirectional data transfer.
 ///
@@ -85,7 +85,7 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
         var receiveContinuation: AsyncThrowingStream<Data, Error>.Continuation?
         var receiveStream: AsyncThrowingStream<Data, Error>?
     }
-    private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
+    private let internalState = Mutex(InternalState())
     
     /// The current state of the stream.
     public var state: State {

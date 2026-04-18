@@ -1,9 +1,28 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 import Foundation
 
 let useDebugMsQuic = ProcessInfo.processInfo.environment["MSQUIC_DEBUG"] != nil
 let msquicTargetName = useDebugMsQuic ? "MsQuicDebug" : "MsQuic"
+
+#if os(Linux)
+let msquicTarget: Target = .binaryTarget(
+    name: msquicTargetName,
+    path: "\(msquicTargetName).artifactbundle"
+)
+#else
+let msquicTarget: Target = useDebugMsQuic
+    ? .binaryTarget(
+        name: "MsQuicDebug",
+        url: "https://github.com/team-unstablers/msquic/releases/download/v2.5.6-tuvariant%2B260410/MsQuic-2.5.6-tuvariant+260410-DEBUG-darwin-multiarch-static-unsigned.zip",
+        checksum: "37e0bccb528c9beec8dfeb7e67924f1d86a00f982c2227ce358dd3e0ca0fe4ae"
+    )
+    : .binaryTarget(
+        name: "MsQuic",
+        url: "https://github.com/team-unstablers/msquic/releases/download/v2.5.6-tuvariant%2B260410/MsQuic-2.5.6-tuvariant+260410-RELEASE-darwin-multiarch-static-unsigned.zip",
+        checksum: "ed33b891aa22e99f725f946ea232a24fdfaa1b971b27c9b8be43031a1f9f35f9"
+    )
+#endif
 
 let package = Package(
     name: "SwiftMsQuic",
@@ -18,17 +37,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.3.0")
     ],
-    targets: [
-        .binaryTarget(
-            name: "MsQuic",
-            url: "https://github.com/team-unstablers/msquic/releases/download/v2.5.6-tuvariant%2B260410/MsQuic-2.5.6-tuvariant+260410-RELEASE-darwin-multiarch-static-unsigned.zip",
-            checksum: "ed33b891aa22e99f725f946ea232a24fdfaa1b971b27c9b8be43031a1f9f35f9",
-        ),
-        .binaryTarget(
-            name: "MsQuicDebug",
-            url: "https://github.com/team-unstablers/msquic/releases/download/v2.5.6-tuvariant%2B260410/MsQuic-2.5.6-tuvariant+260410-DEBUG-darwin-multiarch-static-unsigned.zip",
-            checksum: "37e0bccb528c9beec8dfeb7e67924f1d86a00f982c2227ce358dd3e0ca0fe4ae",
-        ),
+    targets: [msquicTarget] + [
         .target(
             name: "SwiftMsQuicOpenSSLUtils",
             dependencies: [
@@ -38,7 +47,7 @@ let package = Package(
             publicHeadersPath: "Headers",
             cSettings: [
                 .headerSearchPath("."),
-            ],
+            ]
         ),
         .target(
             name: "SwiftMsQuicHelper",
@@ -57,5 +66,6 @@ let package = Package(
                 .interoperabilityMode(.Cxx)
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

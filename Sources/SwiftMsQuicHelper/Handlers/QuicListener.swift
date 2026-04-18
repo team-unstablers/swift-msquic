@@ -7,7 +7,7 @@
 
 import Foundation
 import MsQuic
-import os
+import Synchronization
 
 /// A QUIC listener that accepts incoming connections from clients.
 ///
@@ -67,7 +67,7 @@ public final class QuicListener: QuicObject, @unchecked Sendable {
         var stopContinuation: CheckedContinuation<Void, Never>?
         var connectionHandler: ConnectionHandler?
     }
-    private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
+    private let internalState = Mutex(InternalState())
 
     /// Creates a new listener.
     ///
@@ -136,6 +136,23 @@ public final class QuicListener: QuicObject, @unchecked Sendable {
         }
     }
     
+    /// The local address the listener is bound to, including the port assigned by the OS.
+    ///
+    /// This is useful when starting a listener on port 0 to get the actual assigned port.
+    public var localAddress: QuicAddress? {
+        guard let handle = handle else { return nil }
+        var addr = QUIC_ADDR()
+        var size = UInt32(MemoryLayout<QUIC_ADDR>.size)
+        let status = QuicStatus(api.GetParam(
+            handle,
+            UInt32(QUIC_PARAM_LISTENER_LOCAL_ADDRESS),
+            &size,
+            &addr
+        ))
+        guard status == .success else { return nil }
+        return QuicAddress(addr)
+    }
+
     /// Stops the listener.
     ///
     /// After this method returns, no new connections will be accepted.

@@ -8,9 +8,10 @@
 import Foundation
 import MsQuic
 
+import SwiftMsQuicOpenSSLUtils
+
 #if canImport(Security)
 import Security
-import SwiftMsQuicOpenSSLUtils
 #endif
 
 internal enum QuicEventConverter {
@@ -119,31 +120,69 @@ internal enum QuicEventConverter {
             
         case QUIC_CONNECTION_EVENT_PEER_CERTIFICATE_RECEIVED:
             let cert = event.PEER_CERTIFICATE_RECEIVED
-            
-#if canImport(Security)
-            do {
-                let certificate = try CertBridge.copySecCertificate(fromOpenSSLX509: cert.Certificate).takeRetainedValue()
-                let cfCertChain = try CertBridge.copySecCertificateArray(fromOpenSSLStoreContext: cert.Chain).takeRetainedValue()
 
-                var chain: [QuicCertificate] = []
-                if let casted = ((cfCertChain as NSArray) as? [QuicCertificate]) {
-                    chain = casted
-                }
+            // Extract DER bytes from the OpenSSL X509 pointer via the C bridge
+            let leafDER = CertBridge_CopyDERFromX509(cert.Certificate)
+            defer { CertBridge_Free(leafDER.data) }
 
-                return .peerCertificateReceived(
-                    certificate: certificate,
-                    chain: chain,
-                    deferredErrorFlags: QuicCertificateValidationFlags(rawValue: cert.DeferredErrorFlags),
-                    deferredStatus: QuicStatus(cert.DeferredStatus)
-                )
-            } catch {
-                assertionFailure("Failed to convert peer certificate event: \(error)")
+            guard let leafData = leafDER.data, leafDER.length > 0 else {
+                assertionFailure("Failed to extract DER from peer certificate")
                 return .unknown
             }
-#else
+
+            let derData = Data(bytes: leafData, count: Int(leafDER.length))
+
+            // Extract chain certs
+            let derChain = CertBridge_CopyDERChainFromStoreContext(cert.Chain)
+            defer {
+                if let certs = derChain.certs {
+                    for i in 0..<Int(derChain.count) {
+                        CertBridge_Free(certs[i].data)
+                    }
+                    CertBridge_Free(certs)
+                }
+            }
+
+#if canImport(Security)
+            guard let secCert = SecCertificateCreateWithData(nil, derData as CFData) else {
+                assertionFailure("Failed to create SecCertificate from DER data")
+                return .unknown
+            }
+
+            var chain: [QuicCertificate] = []
+            if let certs = derChain.certs {
+                for i in 0..<Int(derChain.count) {
+                    let c = certs[i]
+                    if let d = c.data, c.length > 0 {
+                        let chainDER = Data(bytes: d, count: Int(c.length))
+                        if let chainCert = SecCertificateCreateWithData(nil, chainDER as CFData) {
+                            chain.append(chainCert)
+                        }
+                    }
+                }
+            }
+
             return .peerCertificateReceived(
-                certificate: cert.Certificate,
-                chain: cert.Chain,
+                certificate: secCert,
+                chain: chain,
+                deferredErrorFlags: QuicCertificateValidationFlags(rawValue: cert.DeferredErrorFlags),
+                deferredStatus: QuicStatus(cert.DeferredStatus)
+            )
+#else
+            let certificate = QuicCertificate(derData: derData)
+            var chain: [QuicCertificate] = []
+            if let certs = derChain.certs {
+                for i in 0..<Int(derChain.count) {
+                    let c = certs[i]
+                    if let d = c.data, c.length > 0 {
+                        chain.append(QuicCertificate(derData: Data(bytes: d, count: Int(c.length))))
+                    }
+                }
+            }
+
+            return .peerCertificateReceived(
+                certificate: certificate,
+                chain: chain,
                 deferredErrorFlags: QuicCertificateValidationFlags(rawValue: cert.DeferredErrorFlags),
                 deferredStatus: QuicStatus(cert.DeferredStatus)
             )
