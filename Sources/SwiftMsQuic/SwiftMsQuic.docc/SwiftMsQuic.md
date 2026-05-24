@@ -1,10 +1,10 @@
-# ``SwiftMsQuicHelper``
+# ``SwiftMsQuic``
 
 A Swift wrapper for Microsoft's MsQuic library, providing modern async/await APIs for QUIC protocol communication.
 
 ## Overview
 
-SwiftMsQuicHelper provides a Swift-friendly interface to the MsQuic library, enabling you to build high-performance network applications using the QUIC protocol. The library leverages Swift Concurrency (async/await) for clean and efficient asynchronous code.
+SwiftMsQuic provides a Swift-friendly interface to the MsQuic library, enabling you to build high-performance network applications using the QUIC protocol. The library leverages Swift Concurrency (async/await) for clean and efficient asynchronous code.
 
 ### Key Features
 
@@ -15,8 +15,14 @@ SwiftMsQuicHelper provides a Swift-friendly interface to the MsQuic library, ena
 
 ### Supported Platforms
 
+- Swift 6.0+ (Xcode 16+)
 - macOS 13.0+
 - iOS 16.0+
+
+SwiftMsQuic is compiled in Swift 6 language mode with strict
+concurrency. Consumers that are still on Swift 5 language mode can
+still link against it, as long as they use a Swift 6.0 or newer
+toolchain.
 
 ## Topics
 

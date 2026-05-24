@@ -1,6 +1,6 @@
 # Getting Started
 
-Learn how to set up and use SwiftMsQuicHelper for QUIC protocol communication.
+Learn how to set up and use SwiftMsQuic for QUIC protocol communication.
 
 ## Overview
 
@@ -8,10 +8,10 @@ This guide walks you through initializing MsQuic, creating a client connection, 
 
 ## Initialize MsQuic
 
-Before using any SwiftMsQuicHelper APIs, you must initialize the MsQuic library:
+Before using any SwiftMsQuic APIs, you must initialize the MsQuic library:
 
 ```swift
-import SwiftMsQuicHelper
+import SwiftMsQuic
 
 // Open the MsQuic library
 try SwiftMsQuicAPI.open().throwIfFailed()
@@ -112,11 +112,10 @@ let listener = try QuicListener(registration: registration)
 listener.onNewConnection { listener, info in
     print("New connection from \(info.remoteAddress)")
 
-    let connection = try QuicConnection(
-        handle: info.connection,
-        configuration: configuration
-    ) { conn, stream, flags in
-        // Handle incoming streams
+    // Accept the connection and attach a stream handler. The leading
+    // `_` in the closure discards the `isolated (any Actor)?` parameter
+    // — use a named parameter if you need to hop into a specific actor.
+    let connection = try info.accept(configuration: configuration) { _, conn, stream, flags in
         do {
             for try await data in stream.receive {
                 print("Received: \(String(data: data, encoding: .utf8) ?? "?")")

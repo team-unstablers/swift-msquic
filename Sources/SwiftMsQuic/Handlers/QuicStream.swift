@@ -16,7 +16,8 @@ import os
 ///
 /// ## Sending Data
 ///
-/// Use ``send(_:flags:)`` to send data on the stream:
+/// Use ``send(_:flags:)-9hicu`` (async) or ``send(_:flags:)-9anpg``
+/// (fire-and-forget) to send data on the stream:
 ///
 /// ```swift
 /// let stream = try connection.openStream()
@@ -46,12 +47,13 @@ import os
 /// ### Managing Stream Lifecycle
 ///
 /// - ``start(flags:)``
-/// - ``shutdown(errorCode:)``
+/// - ``shutdown(flags:errorCode:)``
 /// - ``state``
 ///
 /// ### Data Transfer
 ///
-/// - ``send(_:flags:)``
+/// - ``send(_:flags:)-9hicu``
+/// - ``send(_:flags:)-9anpg``
 /// - ``receive``
 /// - ``setPriority(_:)``
 /// - ``getPriority()``
@@ -274,9 +276,11 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
 
     /// Sends data on the stream without waiting for completion.
     ///
-    /// Unlike ``send(_:flags:)-async``, this method returns immediately after queuing the data
-    /// to MsQuic. The buffer is automatically freed when MsQuic fires the send-complete callback.
-    /// MsQuic guarantees FIFO ordering, so multiple calls to this method will be sent in order.
+    /// Unlike the async overload (``send(_:flags:)-9hicu``), this method
+    /// returns immediately after queuing the data to MsQuic. The buffer is
+    /// automatically freed when MsQuic fires the send-complete callback.
+    /// MsQuic guarantees FIFO ordering, so multiple calls to this method
+    /// will be sent in order.
     ///
     /// - Parameters:
     ///   - data: The data to send.
@@ -401,8 +405,25 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
     }
    
     internal func handleEvent(_ event: QUIC_STREAM_EVENT) -> QuicStatus {
+        // Send completion is dispatched directly from the raw event so we can
+        // read `ClientContext` before it is dropped by the converter. This
+        // keeps the public `QuicStreamEvent` free of raw pointers.
+        if event.Type == QUIC_STREAM_EVENT_SEND_COMPLETE {
+            let rawSend = event.SEND_COMPLETE
+            if let rawContext = rawSend.ClientContext {
+                let sendContext = Unmanaged<SendContext>.fromOpaque(rawContext).takeRetainedValue()
+                if let continuation = sendContext.continuation {
+                    if rawSend.Canceled != 0 {
+                        continuation.resume(throwing: QuicError.aborted)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        }
+
         let swiftEvent = QuicEventConverter.convert(event)
-        
+
         switch swiftEvent {
         case .startComplete(let status, _, _):
             let continuation = internalState.withLock { state -> CheckedContinuation<Void, Error>? in
@@ -418,25 +439,19 @@ public final class QuicStream: QuicObject, @unchecked Sendable {
             } else {
                 continuation?.resume()
             }
-            
+
         case .receive(let data, _, _, let totalLength):
             internalState.withLock { $0.receiveContinuation }?.yield(data)
             if let handle = handle {
                 api.StreamReceiveComplete(handle, totalLength)
                 return .pending
             }
-            
-        case .sendComplete(let canceled, let context):
-            if let context = context {
-                let sendContext = Unmanaged<SendContext>.fromOpaque(context).takeRetainedValue()
-                if let continuation = sendContext.continuation {
-                    if canceled {
-                        continuation.resume(throwing: QuicError.aborted)
-                    } else {
-                        continuation.resume()
-                    }
-                }
-            }
+
+        case .sendComplete:
+            // Already dispatched at the top of `handleEvent` from the raw
+            // event so that the continuation could be resumed without
+            // carrying an `UnsafeMutableRawPointer?` on the public enum.
+            break
             
         case .peerSendShutdown:
             internalState.withLock { $0.receiveContinuation }?.finish()

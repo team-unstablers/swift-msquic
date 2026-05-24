@@ -4,18 +4,118 @@
 
 이 레포지토리는 MsQuic 라이브러리를 Swift에서 쉽게 쓸 수 있도록 prebuilt된 바이너리와 헬퍼 코드를 제공합니다.
 
-- 2026-02-06 기준: `QuicConnection.StreamHandler` 시그니처는 `(QuicConnection, QuicStream, QuicStreamOpenFlags) async -> Void`입니다. `onPeerStreamStarted(_:)`와 `init(handle:configuration:streamHandler:)`도 동일한 3-인자 핸들러를 사용합니다.
+- 2026-02-06 기준: `QuicConnection.StreamHandler` 시그니처는 `(QuicConnection, QuicStream, QuicStreamOpenFlags) async -> Void`였습니다 (v1.x). v2.0.0에서 isolated 파라미터가 앞에 붙었으며, 아래 2026-04-11 항목과 §0.5를 참조하세요.
 - 2026-03-23 기준: 로컬에서 연 `QuicStream`의 `connection` 프로퍼티는 `weak` back-reference입니다. 클라이언트 종료 시에는 활성 stream/task 참조를 먼저 정리해야 `QuicConnection`/`QuicRegistration` 해제가 지연되지 않습니다.
+- 2026-04-10 기준: v2.0.0 Swift 6 migration을 준비하면서 모듈의 방향성이 **"thin C wrapper"**로 명확히 확정되었습니다. 상세 원칙은 아래 §0을, 구체적인 이행 계획은 `swift6-migration-plan.md`를 참조하세요.
+- 2026-04-11 기준: **v2.0.0이 릴리스되었습니다.** Package가 Swift 6.0 tools-version + `swiftLanguageModes: [.v6]`로 전환되었고, `StreamHandler` 시그니처는 `(isolated (any Actor)?, QuicConnection, QuicStream, QuicStreamOpenFlags) async -> Void`가 되었습니다. 나머지 공개 표면 변경(예: `NewConnectionInfo.accept(...)`, raw `HQUIC`/`UnsafeMutableRawPointer?` 제거, `SwiftMsQuicAPI`가 namespace enum으로 전환, `QuicObject`가 `public class` non-`open`으로 강등 등)은 §0.5에 상세히 정리되어 있습니다.
+- 2026-04-11 기준 (v2.0.0 직후): **Swift 모듈 이름이 `SwiftMsQuicHelper`에서 `SwiftMsQuic`으로 rename되었습니다.** 소비자는 `import SwiftMsQuicHelper`를 `import SwiftMsQuic`으로 바꿔야 합니다. Package.swift의 library product 이름(`SwiftMsQuic`/`SwiftMsQuicStatic`)은 그대로 유지됩니다 — 이제 product와 Swift module 이름이 일치합니다. 디렉토리도 `Sources/SwiftMsQuic/`로, DocC 번들도 `SwiftMsQuic.docc`로 함께 이동했습니다. 역사 문서(`swift6-migration-plan.md`)는 당시 기록이므로 과거 이름을 그대로 남겨 둡니다.
 
 </section>
 <section id="design-principles">
 
-# SwiftMsQuicHelper 설계 원칙
+# SwiftMsQuic 설계 원칙
 
-이 섹션은 `SwiftMsQuicHelper` 모듈의 API 및 Struct/Class 래퍼 설계 시 준수해야 할 원칙을 정의합니다.
+이 섹션은 `SwiftMsQuic` 모듈의 API 및 Struct/Class 래퍼 설계 시 준수해야 할 원칙을 정의합니다.
 **모든 에이전트는 이 원칙을 숙지하고, 코드 작성 시 반드시 따라야 합니다.**
 
 > 📖 상세한 구현 계획은 `WRAPPER_PLAN.md`를 참조하세요.
+
+## 0. 모듈 스코프 (Module Scope)
+
+**`SwiftMsQuic`은 MsQuic C 라이브러리의 *얇은 (thin)* Swift wrapper입니다. 고수준 네트워킹 추상화 라이브러리가 아닙니다.**
+
+이 원칙은 2026-04-10 v2.0.0 Swift 6 migration 협의에서 확정되었으며, 아래 모든 세부 원칙(§1 ~ §5)은 이 상위 원칙에 종속됩니다. 새로운 API를 추가하거나 기존 API를 변경할 때, 에이전트는 "이 변경이 thin wrapper의 범위 안에 있는가?"를 먼저 물어야 합니다.
+
+### 0.1 이 모듈이 지향하는 것 (What this module IS)
+
+- **MsQuic의 의미론(semantics)을 투명하게 노출합니다.** Swift-idiomatic한 표면을 제공하되, MsQuic의 동작 모델을 우회하거나 재해석하지 않습니다.
+- **MsQuic의 모든 주요 기능을 표현할 수 있어야 합니다.** Custom certificate validation, datagram context tracking, stream priority, connection resumption ticket 등 MsQuic 고급 기능을 "편의성"을 이유로 감추거나 제거하지 않습니다.
+- **Swift-idiomatic한 표면**은 다음으로 한정됩니다:
+  - `async/await` 기반 API (§1.2)
+  - `CheckedContinuation` / `AsyncThrowingStream`으로 콜백 이벤트를 Swift Concurrency로 변환
+  - Swift `enum`(associated value)으로 C의 union 기반 이벤트 구조체 변환 (§1.3)
+  - `throws` 기반 에러 처리 (§1.4)
+  - `OptionSet`으로 비트 플래그 래핑 (§4.2)
+  - `@Sendable` 클로저 및 `Sendable` 값 타입 — raw C 타입은 public API에 노출하지 않음
+- **MsQuic 새 버전을 빠르게 따라갈 수 있어야 합니다.** 의미론 레이어가 얇을수록 MsQuic 업데이트(API 추가, 시그니처 변경, 바이너리 교체)의 반영 비용이 작아집니다.
+
+### 0.2 이 모듈이 하지 않는 것 (What this module IS NOT)
+
+- **`actor`를 `SwiftMsQuic` 내부에 도입하지 않습니다.** MsQuic 콜백은:
+  1. **임의의 worker 스레드에서 동기적으로** 호출되고,
+  2. 콜백 안에서 **즉시 `QuicStatus` 반환**을 요구하며 (특히 `ConnectionHandler`, `CertificateValidationHandler`, `EventHandler`),
+  3. 반환값이 MsQuic 내부 상태 전이(accept/reject/pending 등)를 결정합니다.
+
+  이 세 가지 제약은 Swift actor isolation 모델과 근본적으로 맞지 않습니다. actor로 전환하면 콜백 진입 시점에 hop이 필요하지만 hop은 async이므로 동기 반환값을 줄 수 없습니다. 따라서 핸들러 클래스(`QuicListener`, `QuicConnection`, `QuicStream`)는 **`OSAllocatedUnfairLock<InternalState>`으로 보호되는 `@unchecked Sendable` class**로 유지합니다. 자세한 스레드 안전성 규칙은 §3을 참조하십시오.
+
+- **고수준 actor 기반 추상화(e.g. `QuicSession`, `QuicClient`, `QuicServer`)를 이 모듈에 추가하지 않습니다.** 그런 레이어가 필요한 사용자(e.g. `noctiluca`)는 이 모듈 위에 **직접** actor 래퍼를 작성합니다. 이유는 두 가지:
+  1. 고수준 추상화의 요구 형태(상태 관리 전략, 연결 풀, 인증 흐름, 재시도 정책 등)는 사용처마다 다르며, 이 모듈에서 하나의 "정답"을 강제하면 다른 사용처에는 맞지 않습니다.
+  2. 두 층 구조를 한 모듈에 섞으면 저수준 API 변경이 고수준 API에 연쇄적으로 영향을 미쳐 유지보수가 어려워집니다.
+
+  대신 `Sources/SwiftMsQuicExample/`에서 **참고용** actor 기반 예제를 제공합니다 (v2.0.0 기준으로 `EchoServer`/`EchoClient` actor로 재작성되어 있습니다). 이 예제는 "사용자 쪽 actor 코드가 어떻게 이 모듈을 소비해야 하는지"를 보여주는 문서 역할만 하며, 모듈의 public API가 아닙니다.
+
+- **동기 콜백을 async로 "편의상" 변환하지 않습니다.** `ConnectionHandler`, `CertificateValidationHandler`, `EventHandler`는 MsQuic의 반환값 요구 때문에 동기로 유지합니다. v2.0.0에서 `StreamHandler`만 예외적으로 async이며, 이는 MsQuic이 stream 시작 이벤트에는 동기 반환값을 요구하지 않기 때문입니다. `StreamHandler`에는 `isolated (any Actor)?` 파라미터가 추가되어 사용자가 호출 측 actor로 자연스럽게 hop할 수 있게 합니다.
+
+- **MsQuic 기능을 "사용자가 쓰기 어렵다"는 이유로 노출에서 제외하지 않습니다.** 해당 기능을 쓰는 사용자가 보일러플레이트를 작성해야 하더라도, 이 모듈의 책임은 해당 기능을 **표현 가능하게** 만드는 것까지입니다. 편의 메서드를 추가하고 싶다면 사용자 측 레이어에서 확장으로 작성합니다.
+
+### 0.3 구체 판단 예시 (Concrete Examples)
+
+| 제안 | thin wrapper에 맞는가? | 이유 |
+|---|---|---|
+| `QuicConnection.sendDatagram(_:)`에 자동 재시도 추가 | ❌ | MsQuic은 재시도를 하지 않음. 재시도 정책은 사용자 레이어 책임. |
+| `NewConnectionInfo.accept(configuration:streamHandler:) -> QuicConnection` 추가 | ✅ | raw `HQUIC` 노출을 제거하기 위한 표면 정리. MsQuic 의미론(연결 수락 시점에 configuration 적용) 보존. |
+| 모든 `QuicConnection`이 내부적으로 `NIOLockedValueBox`에 연결을 등록하고 `shutdown()` 호출 시 모두 정리 | ❌ | 전역 상태 관리. 사용자 레이어가 해야 할 일. |
+| `QuicConnectionEvent.peerStreamStarted(stream: HQUIC, ...)` → `(stream: QuicStream, ...)` | ✅ | raw 포인터 대신 Swift 래퍼로 변환하는 것은 §1.3에 따른 자연스러운 변환. MsQuic 의미론은 동일. |
+| `QuicClient` actor를 `SwiftMsQuic`에 추가 | ❌ | §0.2 위반. `SwiftMsQuicExample`에는 참고용으로 두어도 되지만 모듈 public API가 되어서는 안 됨. |
+| `EventHandler` 대신 `events: AsyncStream<QuicConnectionEvent>` 기반 API로 전환 | ❌ | MsQuic은 `EventHandler`의 반환값(`QuicStatus`)으로 이벤트 처리 결과를 결정함. AsyncStream은 반환값을 표현할 수 없음. 보조적으로 병설하는 것도 의미론 혼란을 유발하므로 하지 않음. |
+| `QuicStream.send(_:flags:)`의 fire-and-forget 오버로드 추가 | ✅ | MsQuic이 SEND_COMPLETE 이벤트를 통해 완료를 알려주므로, 사용자가 대기하지 않는 경우를 위한 편의 오버로드는 적절. 의미론 변경 없음. |
+
+### 0.4 철학적 근거 (Philosophical Rationale)
+
+- **swift-nio와 비교**: swift-nio는 "저수준 `Channel` + 고수준 `AsyncChannel`" 두 층 구조를 한 모듈에서 제공하지만, 그것은 swift-nio가 Swift 생태계의 **기반 네트워킹 라이브러리**이기 때문이며 자체 생태계(extras, HTTP, WebSocket 등 별도 레포)를 통해 고수준을 분리해두었습니다. `swift-msquic`은 규모가 훨씬 작고 MsQuic이라는 단일 백엔드에 종속되므로, "저수준만 담당하고 고수준은 사용자 측"이라는 **더 단순한** 선택을 합니다.
+- **`@unchecked Sendable`에 대한 태도**: `@unchecked`는 "패배 선언"이 아니라 "여기에 수동 동기화가 있고, 그 규칙은 주석과 `OSAllocatedUnfairLock`으로 문서화되어 있다"는 **의도적 선언**입니다. Swift 6 strict concurrency 하에서도 C 라이브러리 래퍼는 이 패턴을 피할 수 없으며, 피하려 하면 MsQuic 의미론을 잃거나 코드가 복잡해집니다. §3 참조.
+
+### 0.5 v2.0.0 릴리스 스냅샷 (2026-04-11)
+
+§0 ~ §4의 원칙을 구현하기 위해 v2.0.0에서 아래 변경이 일괄 반영되었습니다. 이 subsection은 에이전트가 **현재 모듈의 공개 표면을 빠르게 파악**하기 위한 요약이며, 상세 변경 내역(사용자 마이그레이션 가이드 포함)은 `README.md`의 "Migrating from 1.x → 2.0" 섹션을, 이행 과정의 청크별 기록은 `swift6-migration-plan.md`를 참조하세요.
+
+**Package / 언어 모드**
+- `swift-tools-version: 6.0`, `swiftLanguageModes: [.v6]`. strict concurrency가 패키지 전역 기본 모드입니다. 배포 타겟은 그대로 (macOS 13 / iOS 16).
+
+**StreamHandler와 isolation (§0.2, §1.2)**
+- `QuicConnection.StreamHandler`가 `(isolated (any Actor)?, QuicConnection, QuicStream, QuicStreamOpenFlags) async -> Void`로 변경되었습니다. 첫 파라미터는 SE-0420 기반의 actor isolation 파라미터입니다.
+- `onPeerStreamStarted(_:)`와 `init(handle:configuration:streamHandler:)`도 같은 typealias를 사용하므로 자동 반영됩니다.
+- `EventHandler`, `CertificateValidationHandler`, `ConnectionHandler`는 **동기 `@Sendable` 그대로 유지**합니다. MsQuic의 동기 `QuicStatus` 반환 요구 때문입니다 (§0.2 참조).
+
+**이벤트 표면에서 raw C 타입 제거 (§1.3)**
+- `NewConnectionInfo.connection: HQUIC` 제거 → `info.accept(configuration:streamHandler:) throws -> QuicConnection` 메서드로 대체. raw handle은 `internal`로 숨겨졌고 콜백 안에서만 소비됩니다.
+- `QuicConnectionEvent.peerStreamStarted(stream: HQUIC, ...)` → `(stream: QuicStream, ...)`. converter가 콜백 시점에 Swift 래퍼를 즉시 생성합니다.
+- `QuicConnectionEvent.datagramSendStateChanged`와 `QuicStreamEvent.sendComplete`에서 `context: UnsafeMutableRawPointer?` 필드가 제거되었습니다. 해당 dispatch는 `handleEvent` 상단에서 raw event의 `ClientContext`를 직접 읽어 continuation/SendContext를 해제하는 방식으로 바뀌었으므로, public enum에는 노출되지 않습니다.
+
+**글로벌 API / 가시성 (§0.1, §4)**
+- `SwiftMsQuicAPI`가 `public enum` (case 없는 namespace)으로 전환되었고 `shared` 인스턴스가 제거되었습니다. `SwiftMsQuicAPI.MsQuic` (raw API table)은 `internal`로 강등되어 모듈 내부에서만 사용됩니다. 전역 상태(raw API 포인터)는 `OSAllocatedUnfairLock<ApiState>`로 보호됩니다.
+- `QuicExecutionProfile.asLibEnum`: `public extension` → `internal extension`.
+- `QuicObject`: `open class` → `public class` (non-`open`). 외부 모듈에서의 상속은 차단되지만 타입 참조는 가능합니다. (최초 플랜 초안의 `internal class`는 Swift 컴파일러가 public 서브클래스의 internal 부모를 허용하지 않아 채택되지 않았습니다.)
+- `QuicObject.handle`은 `internal nonisolated(unsafe) var`입니다. 쓰기는 `init`에 국한되고, 읽기는 Swift task와 MsQuic C 콜백 스레드 모두에서 발생하지만 `HQUIC`가 불변 opaque 포인터라는 가정 하에 안전합니다.
+- `QuicObject` 자체는 `@unchecked Sendable`입니다. subclass들이 `@Sendable` 클로저(예: `OSAllocatedUnfairLock.withLock` 바디)에서 `self`를 캡처할 수 있도록 하기 위함이며, thread-safety는 §3 규칙에 따라 subclass별 lock으로 제공됩니다.
+- `QuicAddress.raw` / `init(_ raw:)`는 예외적으로 `public` 유지 (noctiluca 호환).
+
+**Sendable 적합성**
+- 모든 configuration/helper 값 타입(`QuicSettings`, `QuicRegistrationConfig`, `QuicCredentialConfig`, `QuicCredentialType`, `QuicExecutionProfile`, `QuicBuffer`)에 `Sendable`이 명시적으로 선언되었습니다.
+- 모든 핸들 클래스(`QuicRegistration`, `QuicConfiguration`, `QuicListener`, `QuicConnection`, `QuicStream`)는 `@unchecked Sendable`이며, `OSAllocatedUnfairLock<InternalState>`로 가변 상태를 보호합니다.
+
+**`withLockUnchecked` 사용 지점**
+- 비-Sendable 값을 lock 경계 밖으로 꺼내야 하는 세 지점에서 `withLock` 대신 `withLockUnchecked`를 사용합니다:
+  1. `SwiftMsQuicAPI.MsQuic` getter — `UnsafeRawPointer?` 반환.
+  2. `QuicObject.retainSelfForCallback()` / `releaseSelfFromCallback()` — `Unmanaged<AnyObject>` 및 `self` 캡처.
+  3. `QuicConnection` datagram send dispatch — `DatagramSendContext?` 반환.
+- 세 경우 모두 직렬화는 여전히 OSAllocatedUnfairLock이 보장하며, non-Sendable 값은 lock 반환 직후 로컬에서만 사용됩니다.
+
+**Pre-existing 버그 수정**
+- `QuicStream.InternalState`의 `receiveStream` 저장 위치, `QuicStream.deinit`/`QuicListener.deinit`의 continuation drain 누락, `QuicListener.start(...)`의 nil-coalescing 모호성, `QuicCertificate.swift`의 non-Darwin 가지 누락이 함께 수정되었습니다. 상세는 `swift6-migration-plan.md` Chunk 1 섹션을 참조하세요.
+
+**Example (`SwiftMsQuicExample`)**
+- `EchoServer`/`EchoClient` actor로 전면 재작성되었습니다. `@main struct App`은 얇은 진입점이며, 새 connection 등록 / 스트림 처리 / 데이터그램 수신은 actor-isolated 메서드로 분리되어 있습니다. 이 예제는 "사용자 측 actor 레이어가 `SwiftMsQuic`을 어떻게 소비해야 하는지"에 대한 참고 구현이며, public API가 아닙니다.
 
 ## 1. 핵심 설계 원칙 (Core Design Principles)
 
@@ -107,8 +207,43 @@ Stream → Connection → Listener → Configuration → Registration → MsQuic
 ## 3. 스레드 안전성 (Thread Safety)
 
 ### 3.1 콜백 스레드
-- MsQuic 콜백은 **임의의 스레드**에서 호출될 수 있습니다.
-- Swift Concurrency 사용 시 `@unchecked Sendable` 또는 `actor` 패턴을 고려합니다.
+- MsQuic 콜백은 **임의의 worker 스레드**에서 **동기적으로** 호출됩니다. 콜백은 즉시 `QuicStatus`를 반환해야 하므로 Swift Concurrency suspension을 사용할 수 없습니다.
+- 이 모듈은 **`actor` 대신 `OSAllocatedUnfairLock`-protected `@unchecked Sendable` class** 패턴을 일관되게 사용합니다 (상세 근거는 §0.2 참조).
+- 모든 가변 상태는 `OSAllocatedUnfairLock<InternalState>` 내부에 두고, `internalState.withLock { ... }`으로만 접근합니다.
+- `CheckedContinuation.resume()` 호출은 반드시 **lock 외부**에서 수행합니다. lock 내부에서 resume하면 continuation이 깨어나는 다른 task가 같은 lock을 잡으려 할 때 deadlock 또는 priority inversion이 발생할 수 있습니다.
+
+```swift
+// ✅ Good - lock 내부에서 continuation을 꺼내 nil로 설정, lock 밖에서 resume
+let continuation = internalState.withLock { state -> CheckedContinuation<Void, Error>? in
+    let c = state.startContinuation
+    state.startContinuation = nil
+    return c
+}
+continuation?.resume()
+
+// ❌ Bad - lock 내부에서 resume
+internalState.withLock { state in
+    state.startContinuation?.resume()  // deadlock 위험
+    state.startContinuation = nil
+}
+```
+
+- 모든 `@unchecked Sendable` 선언에는 **어떤 lock이 어떤 상태를 보호하는지** 명시하는 주석을 달아야 합니다. `@unchecked`는 단순히 컴파일러를 우회하는 도구가 아니라, 수동 동기화의 **의도적 문서화**입니다.
+
+```swift
+// ✅ Good
+/// `internalState` lock protects all mutable fields below; `handle` is
+/// `nonisolated(unsafe)` because it is write-once in init.
+public final class QuicConnection: QuicObject, @unchecked Sendable {
+    private struct InternalState: @unchecked Sendable {
+        // CheckedContinuation / AsyncThrowingStream.Continuation 보관
+        // 모든 접근은 internalState.withLock { ... } 경유
+        var connectContinuation: CheckedContinuation<Void, Error>?
+        // ...
+    }
+    private let internalState = OSAllocatedUnfairLock(initialState: InternalState())
+}
+```
 
 ### 3.2 Continuation 관리
 - 여러 스레드에서 접근 가능한 continuation 딕셔너리는 **lock으로 보호**합니다.
@@ -162,7 +297,7 @@ public struct QuicSettings {
 ## 5. 파일 구조 (File Structure)
 
 ```
-Sources/SwiftMsQuicHelper/
+Sources/SwiftMsQuic/
 ├── Core/
 │   ├── QuicObject.swift          # Base class
 │   ├── QuicError.swift           # 에러 enum

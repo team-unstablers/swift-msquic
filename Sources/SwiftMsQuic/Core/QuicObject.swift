@@ -16,9 +16,31 @@ import os
 ///
 /// - Note: This class is typically not used directly. Use the concrete subclasses
 ///   like ``QuicConnection``, ``QuicStream``, or ``QuicListener`` instead.
-open class QuicObject: CInteropHandle {
-    /// Internal MsQuic Handle
-    internal var handle: HQUIC?
+///   External subclassing is intentionally disallowed — the class is `public`
+///   but not `open`, so only subclasses declared inside `SwiftMsQuic`
+///   itself are permitted.
+///
+/// `QuicObject` is marked `@unchecked Sendable` so that subclasses which are
+/// themselves `@unchecked Sendable` can participate in `@Sendable` closures
+/// (e.g. the `OSAllocatedUnfairLock.withLock` body). Thread safety is
+/// provided by:
+///
+/// - `handle`: `nonisolated(unsafe)`, write-once in `init`, read by both
+///   Swift tasks and MsQuic C callback threads. `HQUIC` is an opaque
+///   pointer whose identity is stable post-init.
+/// - `retainState`: protected by `OSAllocatedUnfairLock<RetainState>`.
+/// - Subclasses carry their own per-instance locks for mutable state.
+public class QuicObject: CInteropHandle, @unchecked Sendable {
+    /// Internal MsQuic Handle.
+    ///
+    /// Marked `nonisolated(unsafe)` because writes are confined to `init`
+    /// (or to the `init`-like path in subclasses that assign after calling
+    /// `super.init()`), while reads happen from both the owning Swift task
+    /// and arbitrary MsQuic worker threads inside C callbacks. The handle
+    /// is an opaque pointer whose identity never changes after
+    /// initialization, so concurrent reads are safe without additional
+    /// synchronization.
+    internal nonisolated(unsafe) var handle: HQUIC?
 
     /// Convenience accessor for the API table
     internal var api: QUIC_API_TABLE { SwiftMsQuicAPI.MsQuic }
@@ -52,15 +74,22 @@ open class QuicObject: CInteropHandle {
     
     /// Retain self for callback lifetime to avoid use-after-free.
     internal func retainSelfForCallback() {
-        retainState.withLock { state in
+        // `withLockUnchecked` because the captured `self` (and the
+        // `Unmanaged<AnyObject>` stored into `RetainState`) are not
+        // Sendable. Serialization is still enforced by the underlying
+        // unfair lock.
+        retainState.withLockUnchecked { state in
             guard state.retainedSelf == nil else { return }
             state.retainedSelf = Unmanaged.passRetained(self as AnyObject)
         }
     }
-    
+
     /// Release previously retained self. Safe to call multiple times.
     internal func releaseSelfFromCallback() {
-        let retained = retainState.withLock { state -> Unmanaged<AnyObject>? in
+        // `withLockUnchecked` because the return type
+        // (`Unmanaged<AnyObject>?`) is not Sendable. Serialization is
+        // still enforced by the underlying unfair lock.
+        let retained = retainState.withLockUnchecked { state -> Unmanaged<AnyObject>? in
             let retained = state.retainedSelf
             state.retainedSelf = nil
             return retained

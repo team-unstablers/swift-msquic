@@ -14,9 +14,14 @@ This library simplifies the usage of the QUIC protocol in Swift applications on 
 
 ## Requirements
 
-- Swift 5.9+
+- Swift 6.0+ (Xcode 16+)
 - macOS 13.0+
 - iOS 16.0+
+
+The package is compiled in Swift 6 language mode (`.v6`) with strict
+concurrency enabled. It can still be consumed by projects that are
+themselves in Swift 5 mode, as long as the toolchain is Swift 6.0 or
+newer.
 
 ## Installation
 
@@ -24,11 +29,11 @@ Add `swift-msquic` to your `Package.swift` dependencies:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/team-unstablers/swift-msquic.git", from: "1.1.3")
+    .package(url: "https://github.com/team-unstablers/swift-msquic.git", from: "2.0.0")
 ]
 ```
 
-Then add `SwiftMsQuicHelper` to your target dependencies:
+Then add `SwiftMsQuic` to your target dependencies:
 
 ```swift
 targets: [
@@ -48,7 +53,7 @@ targets: [
 You must initialize the MsQuic API before using it.
 
 ```swift
-import SwiftMsQuicHelper
+import SwiftMsQuic
 
 // Initialize
 try SwiftMsQuicAPI.open().throwIfFailed()
@@ -118,15 +123,16 @@ func runServer() async throws {
     ))
     
     let listener = try QuicListener(registration: reg)
-    
+
     // Handle new connections
     listener.onNewConnection { listener, info in
-        let connection = try QuicConnection(handle: info.connection, configuration: config) { conn, stream, flags in
-            // Handle new streams
+        // Accept the connection and attach a stream handler. The first
+        // closure parameter is `isolated (any Actor)?` (SE-0420) — use
+        // `_` if you don't need to hop onto a specific actor.
+        let connection = try info.accept(configuration: config) { _, conn, stream, flags in
             do {
                 for try await data in stream.receive {
-                    // Echo back
-                    try await stream.send(data)
+                    try await stream.send(data) // Echo back
                 }
                 await stream.shutdown(flags: .graceful)
             } catch {
@@ -175,10 +181,110 @@ MSQUIC_DEBUG=1 swift build
 
 > **Note**: This environment variable is evaluated at **package resolution time** (`Package.swift`), not at build time. Xcode resolves packages through its own process, so this method works reliably only with the Swift CLI (`swift build`, `swift test`, etc.).
 
+## Migrating from 1.x → 2.0
+
+v2.0.0 adopts Swift 6 strict concurrency and removes most of the raw C
+types from the public API. The migration is mechanical — the following
+are the breaking changes you will almost certainly have to touch:
+
+### The Swift module is now `SwiftMsQuic`
+
+The Swift target was renamed from `SwiftMsQuicHelper` to
+`SwiftMsQuic`. The Swift Package Manager library products
+(`SwiftMsQuic` / `SwiftMsQuicStatic`) keep their names — now the
+product name and the importable module name line up.
+
+```swift
+// v1.x
+import SwiftMsQuicHelper
+
+// v2.0
+import SwiftMsQuic
+```
+
+Your `Package.swift` dependency entry does not need to change: the
+product was already called `SwiftMsQuic` in 1.x, so
+`.product(name: "SwiftMsQuic", package: "swift-msquic")` keeps working.
+
+### Accepting server-side connections
+
+```swift
+// v1.x — construct the connection directly from the raw HQUIC.
+let connection = try QuicConnection(
+    handle: info.connection,
+    configuration: config
+) { conn, stream, flags in
+    // ...
+}
+
+// v2.0 — use the new `accept(...)` helper on NewConnectionInfo.
+let connection = try info.accept(configuration: config) { _, conn, stream, flags in
+    // ...
+}
+```
+
+### `StreamHandler` gains an isolation parameter
+
+The `StreamHandler` typealias now takes an `isolated (any Actor)?` as
+its first parameter (SE-0420). Add a leading `_` (or a named
+`isolation` parameter) to every existing handler closure:
+
+```swift
+// v1.x
+{ conn, stream, flags in ... }
+
+// v2.0
+{ _, conn, stream, flags in ... }
+```
+
+### Events no longer carry raw C pointers
+
+`QuicConnectionEvent.peerStreamStarted`'s associated value is now a
+`QuicStream` wrapper instead of the raw `HQUIC`:
+
+```swift
+// v1.x
+case .peerStreamStarted(let stream, let flags): // stream: HQUIC
+
+// v2.0
+case .peerStreamStarted(let stream, let flags): // stream: QuicStream
+```
+
+`QuicConnectionEvent.datagramSendStateChanged` and
+`QuicStreamEvent.sendComplete` no longer expose the
+`context: UnsafeMutableRawPointer?` field. The async send APIs
+(`connection.sendDatagram(...)`, `stream.send(...)`) already return a
+proper completion result, so the raw context field was redundant.
+
+### `SwiftMsQuicAPI` is a namespace enum
+
+`SwiftMsQuicAPI.shared` has been removed. `SwiftMsQuicAPI.MsQuic` — the
+raw C API table — is now `internal`. Use the Swift wrappers instead
+(they all call into `SwiftMsQuicAPI.MsQuic` via per-object `api`
+accessors).
+
+### Subclassing `QuicObject` is no longer allowed
+
+`QuicObject` is now `public class` (non-`open`), meaning external
+modules can still hold references to it but cannot subclass it. Build
+your own higher-level actors on top of `QuicListener` /
+`QuicConnection` / `QuicStream` instead.
+
+### Upgrade checklist
+
+1. Bump your dependency: `from: "2.0.0"`.
+2. Replace every `import SwiftMsQuicHelper` with `import SwiftMsQuic`.
+3. Replace `QuicConnection(handle: info.connection, configuration:)` with `info.accept(configuration:)`.
+4. Add a leading `_ isolation` parameter to every `StreamHandler` closure.
+5. Adjust pattern matches on `.peerStreamStarted` to take a `QuicStream`.
+6. Drop any reference to the `context` field on `.datagramSendStateChanged` / `.sendComplete`.
+7. Remove references to `SwiftMsQuicAPI.shared`.
+8. Bump your Swift tools-version to 6.0, or keep Swift 5 mode and use a Swift 6.0+ toolchain.
+
 ## Important Notes
 
 - **MsQuic Version**: The included binary is based on **MsQuic v2.5.6**.
-- **Use SwiftMsQuicHelper**: It is strongly recommended to use the `SwiftMsQuicHelper` module instead of importing `MsQuic` directly. Swift's C Interop does not fully support C macros, making it impossible to access MsQuic status codes (which are macros) directly. `SwiftMsQuicHelper` provides proper Swift wrappers (e.g., `QuicStatus`) to handle this.
+- **Use SwiftMsQuic**: It is strongly recommended to use the `SwiftMsQuic` module instead of importing `MsQuic` directly. Swift's C Interop does not fully support C macros, making it impossible to access MsQuic status codes (which are macros) directly. `SwiftMsQuic` provides proper Swift wrappers (e.g., `QuicStatus`) to handle this.
 - **Modifications**: This repository uses a fork of MsQuic maintained by **Team Unstablers Inc.** with the following change:
     - Removed `dlopen(3)` calls in `quic_bugcheck` to ensure compliance with iOS App Store review guidelines.
 

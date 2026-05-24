@@ -29,14 +29,13 @@ import os
 ///
 /// ## Handling Server-Side Connections
 ///
-/// When accepting connections from a ``QuicListener``, use the handle-based initializer:
+/// When accepting connections from a ``QuicListener``, call
+/// ``QuicListenerEvent/NewConnectionInfo/accept(configuration:streamHandler:)``
+/// from inside the listener callback:
 ///
 /// ```swift
 /// listener.onNewConnection { listener, info in
-///     let connection = try QuicConnection(
-///         handle: info.connection,
-///         configuration: configuration
-///     ) { conn, stream, flags in
+///     let connection = try info.accept(configuration: configuration) { conn, stream, flags in
 ///         // Handle incoming streams
 ///     }
 ///     return connection
@@ -134,11 +133,22 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
 
     /// A handler for processing incoming streams initiated by the peer.
     ///
+    /// The first parameter is an `isolated (any Actor)?` (SE-0420). Pass the
+    /// actor that owns the downstream work when calling `onPeerStreamStarted`
+    /// or `info.accept` so that the handler body runs on that actor without
+    /// an extra hop. Pass `nil` to run with no actor isolation.
+    ///
     /// - Parameters:
+    ///   - isolation: The actor the handler body is isolated to, if any.
     ///   - connection: The connection that received the stream.
     ///   - stream: The new stream initiated by the peer.
     ///   - flags: Open flags describing the peer stream direction/properties.
-    public typealias StreamHandler = @Sendable (QuicConnection, QuicStream, QuicStreamOpenFlags) async -> Void
+    public typealias StreamHandler = @Sendable (
+        _ isolation: isolated (any Actor)?,
+        _ connection: QuicConnection,
+        _ stream: QuicStream,
+        _ flags: QuicStreamOpenFlags
+    ) async -> Void
 
     /// A handler for processing connection events.
     ///
@@ -399,7 +409,11 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
             )
 
             if status.failed {
-                let sendContext: DatagramSendContext? = internalState.withLock { state in
+                // `withLockUnchecked`: `DatagramSendContext` intentionally
+                // is not Sendable (it carries raw buffers and a C-side
+                // pointer), but it never escapes the lock scope beyond
+                // this local variable.
+                let sendContext: DatagramSendContext? = internalState.withLockUnchecked { state in
                     guard state.datagramSendContexts.remove(contextToken) != nil else {
                         return nil
                     }
@@ -700,8 +714,51 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
     }
     
     internal func handleEvent(_ event: QUIC_CONNECTION_EVENT) -> QuicStatus {
+        // Datagram send-state completion is dispatched directly from the raw
+        // event so that we can read `ClientContext` before it is dropped by
+        // the converter. This also keeps the public `QuicConnectionEvent`
+        // free of raw pointers.
+        if event.Type == QUIC_CONNECTION_EVENT_DATAGRAM_SEND_STATE_CHANGED {
+            let rawState = event.DATAGRAM_SEND_STATE_CHANGED
+            if let rawContext = rawState.ClientContext {
+                let contextToken = UInt(bitPattern: rawContext)
+                let swiftState = QuicDatagramSendState(rawState.State)
+
+                let finalize: (CheckedContinuation<Void, Error>) -> Void
+                switch swiftState {
+                case .sent, .lostDiscarded, .acknowledged, .acknowledgedSpurious:
+                    finalize = { $0.resume() }
+                case .canceled, .unknown:
+                    finalize = { $0.resume(throwing: QuicError.aborted) }
+                case .lostSuspect:
+                    finalize = { _ in }
+                }
+
+                // `.lostSuspect` is an interim notification: the datagram may
+                // still be delivered, so we keep the context registered and
+                // only drop it on a terminal state.
+                if swiftState != .lostSuspect {
+                    // `withLockUnchecked`: see note on the other send-path
+                    // usage above. `DatagramSendContext` is deliberately
+                    // non-Sendable but is consumed locally.
+                    let sendContext: DatagramSendContext? = internalState.withLockUnchecked { state in
+                        guard state.datagramSendContexts.remove(contextToken) != nil else {
+                            return nil
+                        }
+                        guard let rawPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
+                            return nil
+                        }
+                        return Unmanaged<DatagramSendContext>.fromOpaque(rawPtr).takeRetainedValue()
+                    }
+                    if let sendContext {
+                        finalize(sendContext.continuation)
+                    }
+                }
+            }
+        }
+
         let swiftEvent = QuicEventConverter.convert(event)
-        
+
         let eventHandler = internalState.withLock { $0.eventHandler }
         if let handler = eventHandler {
             let status = handler(self, swiftEvent)
@@ -709,7 +766,7 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
                 return status
             }
         }
-        
+
         switch swiftEvent {
         case .connected:
             let continuation = internalState.withLock { state -> CheckedContinuation<Void, Error>? in
@@ -770,47 +827,28 @@ public final class QuicConnection: QuicObject, @unchecked Sendable {
             }
             connectContinuation?.resume(throwing: QuicError.aborted)
 
-        case .datagramSendStateChanged(let state, let context):
-            guard let context else {
-                break
-            }
-            let contextToken = UInt(bitPattern: context)
+        case .datagramSendStateChanged:
+            // Already dispatched at the top of `handleEvent` from the raw
+            // event so that the continuation could be resumed without needing
+            // to carry a raw `UnsafeMutableRawPointer?` on the public enum.
+            break
 
-            switch state {
-            case .sent, .lostDiscarded, .acknowledged, .acknowledgedSpurious:
-                let sendContext: DatagramSendContext? = internalState.withLock { state in
-                    guard state.datagramSendContexts.remove(contextToken) != nil else {
-                        return nil
-                    }
-                    guard let rawPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
-                        return nil
-                    }
-                    return Unmanaged<DatagramSendContext>.fromOpaque(rawPtr).takeRetainedValue()
-                }
-                sendContext?.continuation.resume()
-
-            case .canceled, .unknown:
-                let sendContext: DatagramSendContext? = internalState.withLock { state in
-                    guard state.datagramSendContexts.remove(contextToken) != nil else {
-                        return nil
-                    }
-                    guard let rawPtr = UnsafeMutableRawPointer(bitPattern: contextToken) else {
-                        return nil
-                    }
-                    return Unmanaged<DatagramSendContext>.fromOpaque(rawPtr).takeRetainedValue()
-                }
-                sendContext?.continuation.resume(throwing: QuicError.aborted)
-
-            case .lostSuspect:
-                break
-            }
-            
-        case .peerStreamStarted(let streamHandle, let flags):
+        case .peerStreamStarted(let stream, let flags):
             let handler = internalState.withLock { $0.peerStreamHandler }
             if let handler {
-                let stream = QuicStream(handle: streamHandle)
-                Task {
-                    await handler(self, stream, flags)
+                // Use `[weak self]` because the connection is already kept
+                // alive for the duration of MsQuic callbacks via
+                // `retainSelfForCallback()`. A strong capture here would
+                // only prolong the lifetime of the detached Task beyond
+                // what the user has opted into.
+                Task { [weak self] in
+                    guard let self else { return }
+                    // Passing `nil` means the handler body runs with no
+                    // actor isolation. Users that want to hop onto a
+                    // specific actor should wrap the call in a method
+                    // isolated to that actor and forward the `isolated`
+                    // parameter through.
+                    await handler(nil, self, stream, flags)
                 }
             }
 

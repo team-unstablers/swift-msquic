@@ -42,7 +42,14 @@ import MsQuic
 /// ### Loading Credentials
 ///
 /// - ``loadCredential(_:)``
-public final class QuicConfiguration: QuicObject {
+///
+/// - Note: `QuicConfiguration` is `@unchecked Sendable`. The MsQuic handle is
+///   write-once in `init` and closed in `deinit`. Credential mutation via
+///   ``loadCredential(_:)`` is the caller's responsibility — the expected
+///   pattern is "create, load credentials during setup, then share." The
+///   `registration` property is an immutable reference to a Sendable
+///   ``QuicRegistration``.
+public final class QuicConfiguration: QuicObject, @unchecked Sendable {
     /// The registration this configuration belongs to.
     public let registration: QuicRegistration
 

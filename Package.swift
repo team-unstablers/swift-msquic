@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 import Foundation
 
@@ -12,8 +12,8 @@ let package = Package(
         .iOS(.v16)
     ],
     products: [
-        .library(name: "SwiftMsQuic", type: .dynamic, targets: [msquicTargetName, "SwiftMsQuicHelper"]),
-        .library(name: "SwiftMsQuicStatic", type: .static, targets: [msquicTargetName, "SwiftMsQuicHelper"]),
+        .library(name: "SwiftMsQuic", type: .dynamic, targets: [msquicTargetName, "SwiftMsQuic"]),
+        .library(name: "SwiftMsQuicStatic", type: .static, targets: [msquicTargetName, "SwiftMsQuic"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.3.0")
@@ -41,21 +41,22 @@ let package = Package(
             ],
         ),
         .target(
-            name: "SwiftMsQuicHelper",
+            name: "SwiftMsQuic",
             dependencies: [
                 .target(name: msquicTargetName),
                 .target(name: "SwiftMsQuicOpenSSLUtils"),
             ],
-            path: "Sources/SwiftMsQuicHelper",
+            path: "Sources/SwiftMsQuic",
             swiftSettings: []
         ),
         .executableTarget(
             name: "SwiftMsQuicExample",
-            dependencies: ["SwiftMsQuicHelper"],
+            dependencies: ["SwiftMsQuic"],
             path: "Sources/SwiftMsQuicExample",
             swiftSettings: [
                 .interoperabilityMode(.Cxx)
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

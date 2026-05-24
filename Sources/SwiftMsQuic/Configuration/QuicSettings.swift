@@ -28,7 +28,7 @@ import MsQuic
 ///     settings: settings
 /// )
 /// ```
-public struct QuicSettings {
+public struct QuicSettings: Sendable {
     /// Maximum number of bytes encrypted with a single key before key update.
     public var maxBytesPerKey: UInt64?
 

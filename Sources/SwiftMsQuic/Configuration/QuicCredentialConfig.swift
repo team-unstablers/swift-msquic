@@ -11,7 +11,7 @@ import MsQuic
 /// The type of TLS credential to use.
 ///
 /// Use this enum to specify how TLS credentials are provided to MsQuic.
-public enum QuicCredentialType {
+public enum QuicCredentialType: Sendable {
     /// Certificate and private key from file paths.
     ///
     /// - Parameters:
@@ -104,7 +104,7 @@ public struct QuicCredentialFlags: OptionSet, Sendable {
 ///     flags: [.client, .noCertificateValidation]
 /// ))
 /// ```
-public struct QuicCredentialConfig {
+public struct QuicCredentialConfig: Sendable {
     /// The type of credential (certificate file, PKCS#12, or none).
     public let type: QuicCredentialType
 

@@ -129,23 +129,32 @@ public struct QuicAddress: CustomStringConvertible, Sendable {
     /// (e.g., "192.168.1.1:443" or "[::1]:443").
     public var description: String {
         var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-        
+
         switch family {
         case .ipv4:
             var addr = raw.Ipv4.sin_addr
             guard inet_ntop(AF_INET, &addr, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil else {
                 return "Invalid IPv4:\(port)"
             }
-            return String(cString: buffer) + ":\(port)"
+            return Self.decodeCString(buffer) + ":\(port)"
         case .ipv6:
             var addr = raw.Ipv6.sin6_addr
             guard inet_ntop(AF_INET6, &addr, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil else {
                 return "Invalid IPv6:\(port)"
             }
-            return "[\(String(cString: buffer))]:\(port)"
+            return "[\(Self.decodeCString(buffer))]:\(port)"
         default:
             return "Unspecified"
         }
+    }
+
+    private static func decodeCString(_ buffer: [CChar]) -> String {
+        // `String(cString:)` is deprecated in Swift 6 for `[CChar]`;
+        // decode manually by truncating at the NUL terminator.
+        let bytes = buffer
+            .prefix { $0 != 0 }
+            .map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
     }
     
     internal func withUnsafeAddress<T>(_ body: (UnsafePointer<QUIC_ADDR>) throws -> T) rethrows -> T {

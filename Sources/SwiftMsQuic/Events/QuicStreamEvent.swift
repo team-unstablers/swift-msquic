@@ -13,7 +13,7 @@ import MsQuic
 /// These events are delivered internally and used to manage stream state.
 /// Most users should use the high-level ``QuicStream`` API instead of
 /// handling these events directly.
-public enum QuicStreamEvent {
+public enum QuicStreamEvent: Sendable {
     /// The stream start operation has completed.
     ///
     /// - Parameters:
@@ -36,10 +36,14 @@ public enum QuicStreamEvent {
 
     /// A send operation has completed.
     ///
-    /// - Parameters:
-    ///   - canceled: Whether the send was canceled.
-    ///   - context: The user-provided context from the send call.
-    case sendComplete(canceled: Bool, context: UnsafeMutableRawPointer?)
+    /// Note: the per-send client context that MsQuic carries on this event is
+    /// intentionally not surfaced. ``QuicStream`` uses the raw context to
+    /// drive its async send continuations (``QuicStream/send(_:flags:)-9hicu``)
+    /// internally; consumers that just want to observe send completions should
+    /// rely on the `canceled` flag alone.
+    ///
+    /// - Parameter canceled: Whether the send was canceled.
+    case sendComplete(canceled: Bool)
 
     /// The peer has finished sending data (FIN received).
     case peerSendShutdown
